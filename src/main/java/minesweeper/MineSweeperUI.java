@@ -153,8 +153,8 @@ public class MineSweeperUI extends JFrame {
         newItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_F2, 0));
         newItem.addActionListener(e -> startGame(rows, cols, mines, mineLayerCount, difficultyKey));
 
-        JMenuItem beginnerItem = new JMenuItem(LEVEL_ESCORT + " (7×14, 10 mines, 0 ships)");
-        beginnerItem.addActionListener(e -> startGame(7, 14, 10, 0, LEVEL_ESCORT));
+        JMenuItem beginnerItem = new JMenuItem(LEVEL_ESCORT + " (8×16, 20 mines, 1 ship)");
+        beginnerItem.addActionListener(e -> startGame(8, 16, 20, 1, LEVEL_ESCORT));
 
         JMenuItem intermediateItem = new JMenuItem(LEVEL_TANKER + " (10×24, 44 mines, 2 ships)");
         intermediateItem.addActionListener(e -> startGame(10, 24, 44, TANKER_MINELAYER_COUNT, LEVEL_TANKER));
