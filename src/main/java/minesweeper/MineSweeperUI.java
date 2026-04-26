@@ -54,6 +54,9 @@ public class MineSweeperUI extends JFrame {
     private static final int CELL_SIZE = 32;
     private static final int BOAT_ANIMATION_DELAY_MS = 16;
     private static final float BOAT_ANIMATION_STEP = 0.18f;
+    private static final int HARBOR_SEQUENCE_DELAY_MS = 40;
+    private static final float HARBOR_DOCKING_STEP = 0.16f;
+    private static final float HARBOR_REFUEL_STEP = 0.08f;
     private static final int MISSILE_ANIMATION_DELAY_MS = 16;
     private static final float MISSILE_FLIGHT_STEP = 0.12f;
     private static final float MISSILE_EXPLOSION_STEP = 0.14f;
@@ -78,6 +81,8 @@ public class MineSweeperUI extends JFrame {
     private MineLayerOverlay mineLayerOverlay;
     private Timer swingTimer;
     private Timer boatAnimationTimer;
+    private Timer harborSequenceTimer;
+    private Timer westDockSequenceTimer;
     private Timer missileAnimationTimer;
     private Timer mineLayerTimer;
     private Board.Snapshot lastMoveSnapshot;
@@ -87,6 +92,11 @@ public class MineSweeperUI extends JFrame {
     private int chordCol = -1;
     private boolean instructionsShown;
     private boolean missileModeArmed;
+    private boolean winDialogShown;
+    private Board.GameState lastGameState = Board.GameState.WAITING;
+    private Board.VoyageStage lastVoyageStage = Board.VoyageStage.OUTBOUND;
+    private HarborSequence harborSequence;
+    private WestDockSequence westDockSequence;
     private MissileAnimation missileAnimation;
 
     // Current difficulty settings
@@ -101,6 +111,8 @@ public class MineSweeperUI extends JFrame {
     private final Icon waveIcon = createWaveIcon(28, 20);
     private final Icon blastIcon = createBlastIcon(26, 22);
     private final Icon successIcon = createHarborIcon(28, 22);
+    private final Icon harborDialogIcon = createHarborIcon(64, 46);
+    private final Icon homecomingDialogIcon = createDockIcon(64, 46);
 
     // In-memory best times (seconds) keyed by difficulty label
     private final Map<String, Integer> bestTimes = new HashMap<>();
@@ -126,8 +138,8 @@ public class MineSweeperUI extends JFrame {
         newItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_F2, 0));
         newItem.addActionListener(e -> startGame(rows, cols, mines, mineLayerCount, difficultyKey));
 
-        JMenuItem beginnerItem = new JMenuItem(LEVEL_ESCORT + " (8×18, 16 mines, 0 ships)");
-        beginnerItem.addActionListener(e -> startGame(8, 18, 16, 0, LEVEL_ESCORT));
+        JMenuItem beginnerItem = new JMenuItem(LEVEL_ESCORT + " (7×14, 10 mines, 0 ships)");
+        beginnerItem.addActionListener(e -> startGame(7, 14, 10, 0, LEVEL_ESCORT));
 
         JMenuItem intermediateItem = new JMenuItem(LEVEL_TANKER + " (10×24, 44 mines)");
         intermediateItem.addActionListener(e -> startGame(10, 24, 44, mineLayerCount, LEVEL_TANKER));
@@ -279,6 +291,12 @@ public class MineSweeperUI extends JFrame {
         if (boatAnimationTimer != null) {
             boatAnimationTimer.stop();
         }
+        if (harborSequenceTimer != null) {
+            harborSequenceTimer.stop();
+        }
+        if (westDockSequenceTimer != null) {
+            westDockSequenceTimer.stop();
+        }
         if (missileAnimationTimer != null) {
             missileAnimationTimer.stop();
         }
@@ -289,8 +307,13 @@ public class MineSweeperUI extends JFrame {
         lastMoveElapsedSeconds = 0;
         elapsedSeconds = 0;
         missileModeArmed = false;
+        winDialogShown = false;
+        harborSequence = null;
+        westDockSequence = null;
 
         board = new Board(rows, cols, mines, this.mineLayerCount);
+        lastGameState = board.getGameState();
+        lastVoyageStage = board.getVoyageStage();
         getContentPane().removeAll();
         buildUI();
         pack();
@@ -410,6 +433,7 @@ public class MineSweeperUI extends JFrame {
                 timerLabel.setText(String.format("%03d", elapsedSeconds));
             }
         });
+        initializeWestApproach();
         swingTimer.start();
         ensureMineLayerTimer();
         if (mineLayerCount > 0) {
@@ -418,7 +442,19 @@ public class MineSweeperUI extends JFrame {
         updateBoard();
     }
 
+    private void initializeWestApproach() {
+        if (board == null || board.getGameState() != Board.GameState.WAITING || cols <= 0) {
+            return;
+        }
+        board.reveal(rows / 2, 0);
+    }
+
     private void onGameWon() {
+        if (winDialogShown) {
+            return;
+        }
+        winDialogShown = true;
+
         boolean newBest = false;
         if (!"Custom".equals(difficultyKey)) {
             Integer previous = bestTimes.get(difficultyKey);
@@ -428,12 +464,25 @@ public class MineSweeperUI extends JFrame {
             }
         }
 
-        String message = newBest
-            ? String.format("You completed the round trip in %d seconds!\nNew best time for %s!", elapsedSeconds, difficultyKey)
-            : String.format("You completed the round trip in %d seconds!", elapsedSeconds);
+        String body = newBest
+            ? String.format(
+                "The tanker is back in the west dock after %d seconds.<br><b>New best time for %s.</b><br>Hormuz is clear again.",
+                elapsedSeconds,
+                difficultyKey)
+            : String.format(
+                "The tanker is back in the west dock after %d seconds.<br>Round trip complete. Hormuz is clear again.",
+                elapsedSeconds);
 
-        SwingUtilities.invokeLater(() ->
-            JOptionPane.showMessageDialog(this, message, "Congratulations! \uD83C\uDF89", JOptionPane.PLAIN_MESSAGE));
+        SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(
+            this,
+            createVoyageDialogPanel(
+                "Home Safe",
+                body,
+                homecomingDialogIcon,
+                blend(STATUS_BG, DOCK_BG, 0.35f),
+                DOCK_BG),
+            "Convoy Home",
+            JOptionPane.PLAIN_MESSAGE));
     }
 
     private void renderCell(int row, int col) {
@@ -534,7 +583,8 @@ public class MineSweeperUI extends JFrame {
             public void mousePressed(MouseEvent e) {
                 if (board.getGameState() == Board.GameState.WON
                     || board.getGameState() == Board.GameState.LOST
-                    || isMissileAnimationActive()) {
+                    || isMissileAnimationActive()
+                    || isArrivalSequenceActive()) {
                     return;
                 }
 
@@ -560,7 +610,8 @@ public class MineSweeperUI extends JFrame {
             public void mouseReleased(MouseEvent e) {
                 if (board.getGameState() == Board.GameState.WON
                     || board.getGameState() == Board.GameState.LOST
-                    || isMissileAnimationActive()) {
+                    || isMissileAnimationActive()
+                    || isArrivalSequenceActive()) {
                     return;
                 }
 
@@ -604,6 +655,8 @@ public class MineSweeperUI extends JFrame {
 
     private void updateBoard() {
         Board.GameState state = board.getGameState();
+        maybeStartHarborSequence(state);
+        maybeStartWestDockSequence(state);
         Point2D targetBoatPosition = getBoatRenderPosition();
 
         for (int r = 0; r < rows; r++) {
@@ -623,14 +676,19 @@ public class MineSweeperUI extends JFrame {
 
         switch (state) {
             case WON:
+                cancelHarborSequence();
                 resetButton.setIcon(successIcon);
                 swingTimer.stop();
                 if (mineLayerTimer != null) {
                     mineLayerTimer.stop();
                 }
-                onGameWon();
+                if (!isWestDockSequenceActive() && !winDialogShown) {
+                    onGameWon();
+                }
                 break;
             case LOST:
+                cancelHarborSequence();
+                cancelWestDockSequence();
                 resetButton.setIcon(blastIcon);
                 swingTimer.stop();
                 if (mineLayerTimer != null) {
@@ -640,6 +698,8 @@ public class MineSweeperUI extends JFrame {
             default:
                 resetButton.setIcon(toolbarBoatIcon);
         }
+
+        lastGameState = state;
     }
 
     private String formatMineCount(int count) {
@@ -714,6 +774,9 @@ public class MineSweeperUI extends JFrame {
         actionMap.put(actionKey, new AbstractAction() {
             @Override
             public void actionPerformed(ActionEvent e) {
+                if (isArrivalSequenceActive() || isMissileAnimationActive()) {
+                    return;
+                }
                 if (board != null) {
                     rememberUndoState();
                 }
@@ -778,6 +841,11 @@ public class MineSweeperUI extends JFrame {
         elapsedSeconds = lastMoveElapsedSeconds;
         timerLabel.setText(String.format("%03d", elapsedSeconds));
         lastMoveSnapshot = null;
+        cancelHarborSequence();
+        cancelWestDockSequence();
+        lastVoyageStage = board.getVoyageStage();
+        lastGameState = board.getGameState();
+        winDialogShown = false;
         setMissileModeArmed(false);
 
         if (board.getGameState() == Board.GameState.PLAYING) {
@@ -806,6 +874,25 @@ public class MineSweeperUI extends JFrame {
         }
         missileOverlay.setVisible(isMissileAnimationActive());
         missileOverlay.repaint();
+    }
+
+    private void maybeStartHarborSequence(Board.GameState state) {
+        Board.VoyageStage currentVoyageStage = board.getVoyageStage();
+        if (state == Board.GameState.PLAYING
+            && lastVoyageStage == Board.VoyageStage.OUTBOUND
+            && currentVoyageStage == Board.VoyageStage.RETURNING
+            && harborSequence == null) {
+            startHarborSequence();
+        }
+        lastVoyageStage = currentVoyageStage;
+    }
+
+    private void maybeStartWestDockSequence(Board.GameState state) {
+        if (state == Board.GameState.WON
+            && lastGameState != Board.GameState.WON
+            && westDockSequence == null) {
+            startWestDockSequence();
+        }
     }
 
     private void updateBoatOverlay(Board.GameState state, Point2D targetBoatPosition) {
@@ -850,6 +937,68 @@ public class MineSweeperUI extends JFrame {
             boolean stillMoving = boatOverlay.stepTowardsTarget();
             if (!stillMoving) {
                 ((Timer) e.getSource()).stop();
+            }
+        });
+    }
+
+    private void ensureHarborSequenceTimer() {
+        if (harborSequenceTimer != null) {
+            return;
+        }
+        harborSequenceTimer = new Timer(HARBOR_SEQUENCE_DELAY_MS, e -> {
+            if (harborSequence == null) {
+                ((Timer) e.getSource()).stop();
+                return;
+            }
+
+            if (harborSequence.dockingProgress < 1f) {
+                harborSequence.dockingProgress = Math.min(1f, harborSequence.dockingProgress + HARBOR_DOCKING_STEP);
+            } else {
+                harborSequence.refuelProgress = Math.min(1f, harborSequence.refuelProgress + HARBOR_REFUEL_STEP);
+            }
+
+            if (boatOverlay != null) {
+                boatOverlay.repaint();
+            }
+
+            if (harborSequence.refuelProgress >= 1f) {
+                ((Timer) e.getSource()).stop();
+                harborSequence = null;
+                if (boatOverlay != null) {
+                    boatOverlay.repaint();
+                }
+                SwingUtilities.invokeLater(this::showHarborArrivalDialog);
+            }
+        });
+    }
+
+    private void ensureWestDockSequenceTimer() {
+        if (westDockSequenceTimer != null) {
+            return;
+        }
+        westDockSequenceTimer = new Timer(HARBOR_SEQUENCE_DELAY_MS, e -> {
+            if (westDockSequence == null) {
+                ((Timer) e.getSource()).stop();
+                return;
+            }
+
+            if (westDockSequence.dockingProgress < 1f) {
+                westDockSequence.dockingProgress = Math.min(1f, westDockSequence.dockingProgress + HARBOR_DOCKING_STEP);
+            } else {
+                westDockSequence.celebrationProgress = Math.min(1f, westDockSequence.celebrationProgress + HARBOR_REFUEL_STEP);
+            }
+
+            if (boatOverlay != null) {
+                boatOverlay.repaint();
+            }
+
+            if (westDockSequence.celebrationProgress >= 1f) {
+                ((Timer) e.getSource()).stop();
+                westDockSequence = null;
+                if (boatOverlay != null) {
+                    boatOverlay.repaint();
+                }
+                onGameWon();
             }
         });
     }
@@ -923,6 +1072,58 @@ public class MineSweeperUI extends JFrame {
         return new Point2D(x, y);
     }
 
+    private void startHarborSequence() {
+        harborSequence = new HarborSequence();
+        setMissileModeArmed(false);
+        ensureHarborSequenceTimer();
+        harborSequenceTimer.start();
+        if (boatOverlay != null) {
+            boatOverlay.repaint();
+        }
+    }
+
+    private void startWestDockSequence() {
+        westDockSequence = new WestDockSequence();
+        setMissileModeArmed(false);
+        ensureWestDockSequenceTimer();
+        westDockSequenceTimer.start();
+        if (boatOverlay != null) {
+            boatOverlay.repaint();
+        }
+    }
+
+    private void cancelHarborSequence() {
+        harborSequence = null;
+        if (harborSequenceTimer != null) {
+            harborSequenceTimer.stop();
+        }
+        if (boatOverlay != null) {
+            boatOverlay.repaint();
+        }
+    }
+
+    private void cancelWestDockSequence() {
+        westDockSequence = null;
+        if (westDockSequenceTimer != null) {
+            westDockSequenceTimer.stop();
+        }
+        if (boatOverlay != null) {
+            boatOverlay.repaint();
+        }
+    }
+
+    private boolean isHarborSequenceActive() {
+        return harborSequence != null;
+    }
+
+    private boolean isWestDockSequenceActive() {
+        return westDockSequence != null;
+    }
+
+    private boolean isArrivalSequenceActive() {
+        return isHarborSequenceActive() || isWestDockSequenceActive();
+    }
+
     private boolean isMissileAnimationActive() {
         return missileAnimation != null;
     }
@@ -962,6 +1163,50 @@ public class MineSweeperUI extends JFrame {
         }
         westDockIconLabel.setIcon(board.isBoatDocked() ? toolbarBoatIcon : dockIcon);
         westDockSubtitleLabel.setText(board.isBoatDocked() ? "Awaiting Orders" : "Launch Clear");
+    }
+
+    private void showHarborArrivalDialog() {
+        JOptionPane.showMessageDialog(
+            this,
+            createVoyageDialogPanel(
+                "Harbor Reached",
+                "The tanker has docked at the east harbor and taken on oil.<br><b>Your job now is to bring it safely back to the west dock.</b>",
+                harborDialogIcon,
+                blend(STATUS_BG, HARBOR_BG, 0.45f),
+                HARBOR_BG),
+            "Harbor Reached",
+            JOptionPane.PLAIN_MESSAGE);
+        updateBoard();
+    }
+
+    private JPanel createVoyageDialogPanel(String title, String body, Icon icon, Color background, Color accent) {
+        JPanel panel = new JPanel(new BorderLayout(12, 0));
+        panel.setBackground(background);
+        panel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(accent.darker(), 2),
+            BorderFactory.createEmptyBorder(14, 14, 14, 14)));
+
+        JLabel iconLabel = new JLabel(icon);
+        iconLabel.setVerticalAlignment(SwingConstants.TOP);
+
+        JLabel titleLabel = new JLabel(title);
+        titleLabel.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 18));
+        titleLabel.setForeground(STATUS_FG.darker());
+
+        JLabel bodyLabel = new JLabel("<html><div style='width:240px;'>" + body + "</div></html>");
+        bodyLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
+        bodyLabel.setForeground(STATUS_FG);
+
+        JPanel textPanel = new JPanel();
+        textPanel.setLayout(new BoxLayout(textPanel, BoxLayout.Y_AXIS));
+        textPanel.setOpaque(false);
+        textPanel.add(titleLabel);
+        textPanel.add(Box.createVerticalStrut(8));
+        textPanel.add(bodyLabel);
+
+        panel.add(iconLabel, BorderLayout.WEST);
+        panel.add(textPanel, BorderLayout.CENTER);
+        return panel;
     }
 
     private JPanel createEdgeMarkerPanel(String title, String subtitle, Icon icon, Color background, boolean westDock) {
@@ -1243,6 +1488,16 @@ public class MineSweeperUI extends JFrame {
         }
     }
 
+    private static final class HarborSequence {
+        private float dockingProgress;
+        private float refuelProgress;
+    }
+
+    private static final class WestDockSequence {
+        private float dockingProgress;
+        private float celebrationProgress;
+    }
+
     private final class BoatOverlay extends JComponent {
         private float currentX;
         private float currentY;
@@ -1307,12 +1562,74 @@ public class MineSweeperUI extends JFrame {
             Graphics2D g = (Graphics2D) graphics.create();
             try {
                 enableQuality(g);
-                g.translate(currentX, currentY);
+                float dockOffset = 0f;
+                if (harborSequence != null) {
+                    dockOffset = harborSequence.dockingProgress * 6f;
+                } else if (westDockSequence != null) {
+                    dockOffset = -westDockSequence.dockingProgress * 6f;
+                }
+                g.translate(currentX + dockOffset, currentY);
                 g.setColor(new Color(255, 255, 255, 56));
                 g.fill(new RoundRectangle2D.Double(1, 1, CELL_SIZE * 2 - 2, CELL_SIZE - 2, 16, 16));
                 paintBoat(g, CELL_SIZE * 2, CELL_SIZE);
+                if (harborSequence != null) {
+                    paintHarborRefuelEffect(g, harborSequence);
+                } else if (westDockSequence != null) {
+                    paintWestDockArrivalEffect(g, westDockSequence);
+                }
             } finally {
                 g.dispose();
+            }
+        }
+
+        private void paintHarborRefuelEffect(Graphics2D g, HarborSequence sequence) {
+            float clampDocking = Math.max(0f, Math.min(1f, sequence.dockingProgress));
+            float clampRefuel = Math.max(0f, Math.min(1f, sequence.refuelProgress));
+
+            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.45f + 0.35f * clampDocking));
+            g.setColor(new Color(231, 241, 245));
+            g.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g.drawLine(CELL_SIZE * 2 - 10, 7, CELL_SIZE * 2 + 10, 2);
+            g.drawLine(CELL_SIZE * 2 - 10, CELL_SIZE - 8, CELL_SIZE * 2 + 10, CELL_SIZE - 3);
+
+            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.7f));
+            g.setColor(new Color(61, 70, 76));
+            g.setStroke(new BasicStroke(4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g.drawLine(CELL_SIZE * 2 - 17, 6, CELL_SIZE * 2 - 9, 10);
+
+            if (clampDocking >= 1f) {
+                g.setColor(new Color(34, 42, 46));
+                g.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g.drawLine(CELL_SIZE * 2 - 14, 6, CELL_SIZE * 2 - 28, 8);
+
+                g.setColor(new Color(191, 138, 47, 210));
+                float fillWidth = Math.max(0f, (CELL_SIZE * 2 - 28f) * clampRefuel);
+                g.fill(new RoundRectangle2D.Float(14, CELL_SIZE - 13, fillWidth, 5f, 4f, 4f));
+
+                g.setColor(new Color(255, 219, 123, 190));
+                g.fill(new Ellipse2D.Float(CELL_SIZE * 2 - 19, 4f, 10f, 10f));
+            }
+        }
+
+        private void paintWestDockArrivalEffect(Graphics2D g, WestDockSequence sequence) {
+            float clampDocking = Math.max(0f, Math.min(1f, sequence.dockingProgress));
+            float clampCelebration = Math.max(0f, Math.min(1f, sequence.celebrationProgress));
+
+            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.45f + 0.25f * clampDocking));
+            g.setColor(new Color(222, 213, 194));
+            g.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g.drawLine(2, 6, -10, 2);
+            g.drawLine(2, CELL_SIZE - 7, -10, CELL_SIZE - 3);
+
+            if (clampDocking >= 1f) {
+                g.setColor(new Color(208, 180, 103, 210));
+                g.fill(new Ellipse2D.Float(5f, 4f, 10f, 10f));
+
+                g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.35f + 0.45f * clampCelebration));
+                g.setColor(new Color(255, 230, 157));
+                g.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g.drawArc(6, -2, 20, 12, 15, 150);
+                g.drawArc(18, -4, 18, 10, 5, 150);
             }
         }
     }
