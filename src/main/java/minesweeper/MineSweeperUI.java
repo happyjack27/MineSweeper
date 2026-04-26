@@ -11,7 +11,7 @@ import java.awt.event.*;
  */
 public class MineSweeperUI extends JFrame {
 
-    // Colour constants for number labels
+    // Color constants for number labels
     private static final Color[] NUMBER_COLORS = {
         null,
         new Color(0, 0, 255),    // 1 – blue
@@ -33,6 +33,8 @@ public class MineSweeperUI extends JFrame {
     private JButton resetButton;
     private Timer swingTimer;
     private int elapsedSeconds;
+    private int chordRow = -1;
+    private int chordCol = -1;
 
     // Current difficulty settings
     private int rows;
@@ -208,6 +210,14 @@ public class MineSweeperUI extends JFrame {
                     || board.getGameState() == Board.GameState.LOST) {
                     return;
                 }
+                int modifiers = e.getModifiersEx();
+                if (SwingUtilities.isMiddleMouseButton(e)
+                    || ((modifiers & InputEvent.BUTTON1_DOWN_MASK) != 0
+                    && (modifiers & InputEvent.BUTTON3_DOWN_MASK) != 0)) {
+                    chordRow = row;
+                    chordCol = col;
+                    return;
+                }
                 if (SwingUtilities.isLeftMouseButton(e)) {
                     resetButton.setText("\uD83D\uDE2E"); // 😮
                 }
@@ -219,13 +229,20 @@ public class MineSweeperUI extends JFrame {
                     || board.getGameState() == Board.GameState.LOST) {
                     return;
                 }
-                if (SwingUtilities.isLeftMouseButton(e) && SwingUtilities.isRightMouseButton(e)) {
+                if ((row == chordRow && col == chordCol)
+                    && (SwingUtilities.isMiddleMouseButton(e)
+                    || SwingUtilities.isLeftMouseButton(e)
+                    || SwingUtilities.isRightMouseButton(e))) {
                     board.chord(row, col);
+                    chordRow = -1;
+                    chordCol = -1;
                 } else if (SwingUtilities.isLeftMouseButton(e)) {
                     board.reveal(row, col);
                 } else if (SwingUtilities.isRightMouseButton(e)) {
                     board.toggleFlag(row, col);
                 }
+                chordRow = -1;
+                chordCol = -1;
                 updateBoard();
             }
         });
@@ -298,8 +315,6 @@ public class MineSweeperUI extends JFrame {
         btn.setBackground(new Color(210, 210, 210));
 
         if (cell.isMine()) {
-            btn.setBackground(board.getGameState() == Board.GameState.LOST
-                && isTriggerMine(row, col) ? Color.RED : new Color(210, 210, 210));
             btn.setText("\uD83D\uDCA3");  // 💣
             btn.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 16));
         } else {
@@ -313,21 +328,6 @@ public class MineSweeperUI extends JFrame {
             }
         }
         btn.setEnabled(false);
-    }
-
-    private boolean isTriggerMine(int row, int col) {
-        // The "last revealed mine" is the red one; we identify it by checking that
-        // it was revealed while the others are also revealed but not red.
-        // For simplicity, we colour ALL mines the same neutral way except the first
-        // one found revealed while in LOST state – that one gets red via the
-        // Board.revealAllMines which sets state to REVEALED after the trigger.
-        // We don't track the trigger cell separately here; the board's revealAllMines
-        // sets the trigger cell FIRST (it was already revealed before the loop),
-        // so we just check if this was the mine that caused the loss by seeing
-        // whether it is the only mine that was set to REVEALED outside the loop.
-        // The simplest heuristic: cells revealed in LOST with adj=0 but mine → trigger.
-        // Actually, let's just mark all mines the same to keep it simple.
-        return false;
     }
 
     // -------------------------------------------------------------------------
