@@ -9,7 +9,9 @@ public class Cell {
         HIDDEN,
         REVEALED,
         FLAGGED,
-        QUESTION
+        QUESTION,
+        /** A flagged cell that turned out not to contain a mine (shown after a loss). */
+        WRONG_FLAG
     }
 
     private boolean mine;
