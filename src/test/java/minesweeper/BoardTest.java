@@ -1,6 +1,10 @@
 package minesweeper;
 
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Random;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -12,6 +16,7 @@ class BoardTest {
     void initialStateIsWaiting() {
         Board board = new Board(9, 9, 10);
         assertEquals(Board.GameState.WAITING, board.getGameState());
+        assertTrue(board.isBoatDocked());
     }
 
     @Test
@@ -33,12 +38,10 @@ class BoardTest {
 
     @Test
     void firstClickCellIsNeverAMine() {
-        // Repeat many times to be statistically confident
         for (int i = 0; i < 50; i++) {
             Board board = new Board(9, 9, 10);
             board.reveal(4, 4);
-            assertFalse(board.getCell(4, 4).isMine(),
-                "The first-clicked cell should never be a mine");
+            assertFalse(board.getCell(4, 4).isMine());
         }
     }
 
@@ -49,8 +52,7 @@ class BoardTest {
             board.reveal(4, 4);
             for (int dr = -1; dr <= 1; dr++) {
                 for (int dc = -1; dc <= 1; dc++) {
-                    assertFalse(board.getCell(4 + dr, 4 + dc).isMine(),
-                        "Neighbours of first click should never be mines");
+                    assertFalse(board.getCell(4 + dr, 4 + dc).isMine());
                 }
             }
         }
@@ -65,70 +67,81 @@ class BoardTest {
 
     @Test
     void flagTogglesState() {
-        Board board = new Board(9, 9, 10);
-        // First click to start the game (so we can flag)
-        board.reveal(0, 0);
-        // Find a hidden cell to flag
-        int fr = -1, fc = -1;
-        outer:
-        for (int r = 0; r < 9; r++) {
-            for (int c = 0; c < 9; c++) {
-                if (board.getCell(r, c).getState() == Cell.State.HIDDEN) {
-                    fr = r; fc = c;
-                    break outer;
-                }
-            }
-        }
-        assertTrue(fr >= 0, "There should be at least one hidden cell");
-        board.toggleFlag(fr, fc);
-        assertEquals(Cell.State.FLAGGED, board.getCell(fr, fc).getState());
-        board.toggleFlag(fr, fc);
-        assertEquals(Cell.State.QUESTION, board.getCell(fr, fc).getState());
-        board.toggleFlag(fr, fc);
-        assertEquals(Cell.State.HIDDEN, board.getCell(fr, fc).getState());
+        boolean[][] grid = {
+            {true, false, false},
+            {false, false, false},
+            {false, false, false}
+        };
+        Board board = new Board(grid);
+
+        board.reveal(1, 1);
+        board.toggleFlag(0, 2);
+        assertEquals(Cell.State.FLAGGED, board.getCell(0, 2).getState());
+
+        board.toggleFlag(0, 2);
+        assertEquals(Cell.State.QUESTION, board.getCell(0, 2).getState());
+
+        board.toggleFlag(0, 2);
+        assertEquals(Cell.State.HIDDEN, board.getCell(0, 2).getState());
     }
 
     @Test
     void flaggedCellCannotBeRevealed() {
-        Board board = new Board(9, 9, 10);
-        board.reveal(4, 4);
-        int fr = -1, fc = -1;
-        outer:
-        for (int r = 0; r < 9; r++) {
-            for (int c = 0; c < 9; c++) {
-                if (board.getCell(r, c).getState() == Cell.State.HIDDEN) {
-                    fr = r; fc = c;
-                    break outer;
-                }
-            }
-        }
-        assertTrue(fr >= 0);
-        board.toggleFlag(fr, fc);
-        board.reveal(fr, fc);
-        assertEquals(Cell.State.FLAGGED, board.getCell(fr, fc).getState());
+        boolean[][] grid = {
+            {true, false, false},
+            {false, false, false},
+            {false, false, false}
+        };
+        Board board = new Board(grid);
+        board.reveal(1, 1);
+        board.toggleFlag(0, 0);
+        board.reveal(0, 0);
+
+        assertEquals(Cell.State.FLAGGED, board.getCell(0, 0).getState());
     }
 
     @Test
+    void chordRevealsAllUnmarkedNeighborsWhenFlagsMatch() {
+        boolean[][] grid = {
+            {true, false, false},
+            {false, false, false},
+            {false, false, false}
+        };
+        Board board = new Board(grid);
+
+        board.reveal(1, 1);
+        board.toggleFlag(0, 0);
+
+        assertEquals(Cell.State.HIDDEN, board.getCell(0, 1).getState());
+        assertEquals(Cell.State.HIDDEN, board.getCell(0, 2).getState());
+
+        board.chord(1, 1);
+
+        assertEquals(Cell.State.REVEALED, board.getCell(0, 1).getState());
+        assertEquals(Cell.State.REVEALED, board.getCell(0, 2).getState());
+        assertEquals(Cell.State.FLAGGED, board.getCell(0, 0).getState());
+    }
+    @Test
     void remainingMinesCountUpdatesWithFlags() {
-        Board board = new Board(9, 9, 10);
-        assertEquals(10, board.getRemainingMines());
-        board.reveal(4, 4);
-        // Flag any hidden cell
-        for (int r = 0; r < 9; r++) {
-            for (int c = 0; c < 9; c++) {
-                if (board.getCell(r, c).getState() == Cell.State.HIDDEN) {
-                    board.toggleFlag(r, c);
-                    assertEquals(9, board.getRemainingMines());
-                    return;
-                }
-            }
-        }
+        boolean[][] grid = {
+            {true, false, true},
+            {false, false, false},
+            {false, false, false}
+        };
+        Board board = new Board(grid);
+        assertEquals(2, board.getRemainingMines());
+
+        board.reveal(1, 1);
+        board.toggleFlag(0, 0);
+
+        assertEquals(1, board.getRemainingMines());
     }
 
     @Test
     void totalMinesCountIsCorrect() {
         Board board = new Board(9, 9, 10);
         board.reveal(4, 4);
+
         int mineCount = 0;
         for (int r = 0; r < 9; r++) {
             for (int c = 0; c < 9; c++) {
@@ -137,77 +150,508 @@ class BoardTest {
                 }
             }
         }
+
         assertEquals(10, mineCount);
     }
 
     @Test
-    void winOnSmallBoardWithOneMine() {
-        // 3×3 board, mine at (0,0). Reveal all safe cells to win.
+    void firstClickSeedsFirstColumnWithFlagsAndClears() {
+        Board board = new Board(9, 9, 10);
+        board.reveal(4, 4);
+
+        for (int r = 0; r < 9; r++) {
+            Cell cell = board.getCell(r, 0);
+            if (cell.isMine()) {
+                assertEquals(Cell.State.FLAGGED, cell.getState());
+            } else {
+                assertEquals(Cell.State.REVEALED, cell.getState());
+            }
+        }
+    }
+
+    @Test
+    void configuredMineLayerCountSpawnsAfterFirstReveal() {
+        Board board = new Board(8, 18, 24, 3, new Random(0L));
+
+        board.reveal(4, 4);
+
+        assertEquals(3, board.getMineLayerPositions().size());
+        assertEquals(3, board.getMineLayerCount());
+    }
+
+    @Test
+    void mineLayerMovementHidesVisitedCells() {
         boolean[][] grid = {
-            {true,  false, false},
+            {false, false}
+        };
+        Board board = new Board(grid, 1, new Random(0L));
+
+        List<Board.MineLayerPosition> initialPositions = board.getMineLayerPositions();
+        assertEquals(1, initialPositions.size());
+        assertEquals(1, initialPositions.get(0).getCol());
+
+        board.getCell(0, 0).setState(Cell.State.REVEALED);
+
+        assertTrue(board.advanceMineLayers());
+        assertEquals(Cell.State.HIDDEN, board.getCell(0, 0).getState());
+        assertEquals(0, board.getMineLayerPositions().get(0).getCol());
+    }
+
+    @Test
+    void missileDestroysMineLayerAndConsumesOneMissile() {
+        boolean[][] grid = {
+            {false, false, false},
+            {false, false, false},
+            {false, false, false}
+        };
+        Board board = new Board(grid, 1, new Random(0L));
+        Board.MineLayerPosition target = board.getMineLayerPositions().get(0);
+
+        assertEquals(3, board.getMissilesRemaining());
+        assertTrue(board.fireMissileAt(target.getRow(), target.getCol()));
+
+        assertEquals(2, board.getMissilesRemaining());
+        assertFalse(board.hasMineLayerAt(target.getRow(), target.getCol()));
+        assertTrue(board.getMineLayerPositions().isEmpty());
+    }
+
+    @Test
+    void missileClearsMinesInThreeByThreeBlastRadius() {
+        boolean[][] grid = {
+            {true, true, false, false},
+            {true, true, false, false},
+            {false, false, false, false},
+            {false, false, false, true}
+        };
+        Board board = new Board(grid);
+
+        assertTrue(board.fireMissileAt(1, 1));
+
+        for (int row = 0; row <= 2; row++) {
+            for (int col = 0; col <= 2; col++) {
+                assertFalse(board.getCell(row, col).isMine());
+            }
+        }
+        assertTrue(board.getCell(3, 3).isMine());
+        assertEquals(2, board.getMissilesRemaining());
+    }
+
+    @Test
+    void missileRevealsEntireThreeByThreeBlastRadius() {
+        boolean[][] grid = {
+            {true, true, false, false},
+            {true, false, false, false},
+            {false, false, false, false},
+            {false, false, false, false}
+        };
+        Board board = new Board(grid);
+        board.toggleFlag(0, 0);
+
+        assertTrue(board.fireMissileAt(1, 1));
+
+        for (int row = 0; row <= 2; row++) {
+            for (int col = 0; col <= 2; col++) {
+                assertEquals(Cell.State.REVEALED, board.getCell(row, col).getState());
+            }
+        }
+        assertEquals(2, board.getMissilesRemaining());
+    }
+
+    @Test
+    void missileDestroysMineLayersAnywhereInThreeByThreeBlastRadius() {
+        boolean[][] grid = {
+            {false, false, false},
+            {false, false, false},
+            {false, false, false}
+        };
+        Board board = new Board(grid, 1, new Random(0L));
+        Board.MineLayerPosition target = board.getMineLayerPositions().get(0);
+
+        assertTrue(Math.abs(target.getRow() - 1) <= 1 && Math.abs(target.getCol() - 1) <= 1);
+        assertTrue(board.fireMissileAt(1, 1));
+
+        assertFalse(board.hasMineLayerAt(target.getRow(), target.getCol()));
+        assertTrue(board.getMineLayerPositions().isEmpty());
+        assertEquals(2, board.getMissilesRemaining());
+    }
+
+    @Test
+    void destroyedMineLayerRespawnsOnPerimeterAfterDelay() {
+        boolean[][] grid = {
+            {false, false, false},
+            {false, false, false},
+            {false, false, false}
+        };
+        Board board = new Board(grid, 1, new Random(0L));
+        Board.MineLayerPosition target = board.getMineLayerPositions().get(0);
+
+        assertTrue(board.fireMissileAt(target.getRow(), target.getCol()));
+        assertTrue(board.getMineLayerPositions().isEmpty());
+
+        for (int i = 0; i < 5; i++) {
+            board.advanceMineLayers();
+            assertTrue(board.getMineLayerPositions().isEmpty());
+        }
+
+        board.advanceMineLayers();
+
+        assertEquals(1, board.getMineLayerPositions().size());
+        Board.MineLayerPosition respawned = board.getMineLayerPositions().get(0);
+        assertTrue(respawned.getRow() == 0 || respawned.getRow() == 2 || respawned.getCol() == 0 || respawned.getCol() == 2);
+    }
+
+    @Test
+    void launchingBoatPushesNearbyMineLayerOutsideTwoCellBuffer() {
+        boolean[][] grid = {
+            {false, false, false, false, false},
+            {false, false, false, false, false},
+            {false, false, false, false, false}
+        };
+        Board board = new Board(grid, 1, new Random(0L));
+
+        for (int col = 0; col < 5; col++) {
+            board.reveal(1, col);
+        }
+
+        assertTrue(board.moveBoatTo(1, 0));
+        for (Board.MineLayerPosition position : board.getMineLayerPositions()) {
+            assertTrue(isAtLeastTwoCellsFromBoat(board, position));
+        }
+    }
+
+    @Test
+    void mineLayerRespawnStaysAtLeastTwoCellsFromBoat() {
+        boolean[][] grid = {
+            {false, false, false, false, false},
+            {false, false, false, false, false},
+            {false, false, false, false, false}
+        };
+        Board board = new Board(grid, 1, new Random(0L));
+
+        for (int col = 0; col < 5; col++) {
+            board.reveal(1, col);
+        }
+
+        assertTrue(board.moveBoatTo(1, 0));
+        Board.MineLayerPosition target = board.getMineLayerPositions().get(0);
+        assertTrue(board.fireMissileAt(target.getRow(), target.getCol()));
+
+        for (int i = 0; i < 6; i++) {
+            board.advanceMineLayers();
+        }
+
+        Board.MineLayerPosition respawned = board.getMineLayerPositions().get(0);
+        assertTrue(isAtLeastTwoCellsFromBoat(board, respawned));
+    }
+
+    @Test
+    void movingMineLayerKeepsTwoCellBufferFromBoat() {
+        boolean[][] grid = {
+            {false, false, false, false, false},
+            {false, false, false, false, false},
+            {false, false, false, false, false}
+        };
+        Board board = new Board(grid, 1, new Random(0L));
+
+        for (int col = 0; col < 5; col++) {
+            board.reveal(1, col);
+        }
+
+        assertTrue(board.moveBoatTo(1, 0));
+        for (int i = 0; i < 5; i++) {
+            board.advanceMineLayers();
+            for (Board.MineLayerPosition position : board.getMineLayerPositions()) {
+                assertTrue(isAtLeastTwoCellsFromBoat(board, position));
+            }
+        }
+    }
+
+    @Test
+    void restoringSnapshotRevertsBoardState() {
+        boolean[][] grid = {
+            {true, false, false},
             {false, false, false},
             {false, false, false}
         };
         Board board = new Board(grid);
-        // Reveal all safe cells
-        for (int r = 0; r < 3; r++) {
-            for (int c = 0; c < 3; c++) {
-                if (!board.getCell(r, c).isMine()) {
-                    board.reveal(r, c);
-                }
-            }
-        }
+
+        Board.Snapshot snapshot = board.createSnapshot();
+        board.reveal(1, 1);
+        board.toggleFlag(0, 0);
+        board.moveBoatTo(1, 0);
+
+        board.restoreSnapshot(snapshot);
+
+        assertEquals(Board.GameState.PLAYING, board.getGameState());
+        assertTrue(board.isBoatDocked());
+    assertEquals(Board.VoyageStage.OUTBOUND, board.getVoyageStage());
+        assertEquals(-1, board.getBoatRow());
+        assertEquals(-1, board.getBoatCol());
+        assertEquals(Cell.State.HIDDEN, board.getCell(1, 1).getState());
+        assertEquals(Cell.State.HIDDEN, board.getCell(0, 0).getState());
+    }
+
+    @Test
+    void boatStartsDockedUntilPlayerLaunchesIt() {
+        boolean[][] grid = {
+            {true, false, false},
+            {false, false, false},
+            {false, false, false}
+        };
+        Board board = new Board(grid);
+
+        board.reveal(1, 0);
+
+        assertTrue(board.isBoatDocked());
+        assertEquals(-1, board.getBoatRow());
+        assertEquals(-1, board.getBoatCol());
+    }
+
+    @Test
+    void boatCanLaunchOnlyFromRevealedWestEdge() {
+        boolean[][] grid = {
+            {false, false, false, false},
+            {false, true, true, false},
+            {false, false, false, false}
+        };
+        Board board = new Board(grid);
+
+        board.reveal(2, 0);
+        board.reveal(2, 1);
+
+        assertFalse(board.moveBoatTo(2, 1));
+        assertTrue(board.moveBoatTo(2, 0));
+        assertFalse(board.isBoatDocked());
+        assertEquals(2, board.getBoatRow());
+        assertEquals(0, board.getBoatCol());
+    }
+
+    @Test
+    void boatRequiresTwoClearHorizontalCells() {
+        boolean[][] grid = {
+            {false, true, false},
+            {false, false, false}
+        };
+        Board board = new Board(grid);
+
+        board.reveal(0, 0);
+        board.reveal(1, 0);
+        board.reveal(1, 1);
+
+        assertFalse(board.moveBoatTo(0, 0));
+        assertTrue(board.moveBoatTo(1, 0));
+        assertTrue(board.isBoatOccupying(1, 0));
+        assertTrue(board.isBoatOccupying(1, 1));
+    }
+
+    @Test
+    void boatMovesAlongStraightRevealedChannel() {
+        boolean[][] grid = {
+            {false, false, false, false, false},
+            {false, true, true, true, false},
+            {false, false, false, false, false}
+        };
+        Board board = new Board(grid);
+
+        board.reveal(2, 0);
+        board.reveal(2, 1);
+        board.reveal(2, 2);
+        board.reveal(2, 3);
+        board.reveal(2, 4);
+        assertTrue(board.moveBoatTo(2, 0));
+
+        assertTrue(board.moveBoatTo(2, 3));
+        assertFalse(board.moveBoatTo(1, 1));
+        assertEquals(2, board.getBoatRow());
+        assertEquals(3, board.getBoatCol());
+    }
+
+    @Test
+    void boatCannotSkipOverUnrevealedCells() {
+        boolean[][] grid = {
+            {false, false, false, false},
+            {false, true, true, false},
+            {false, false, false, false}
+        };
+        Board board = new Board(grid);
+
+        board.reveal(2, 0);
+        board.reveal(2, 1);
+        board.reveal(2, 2);
+        assertTrue(board.moveBoatTo(2, 0));
+
+        assertFalse(board.moveBoatTo(2, 2));
+        assertEquals(0, board.getBoatCol());
+    }
+
+    @Test
+    void directionalMoveAdvancesOneSquare() {
+        boolean[][] grid = {
+            {false, false, false, false, false},
+            {false, true, true, true, false},
+            {false, false, false, false, false}
+        };
+        Board board = new Board(grid);
+
+        board.reveal(2, 0);
+        board.reveal(2, 1);
+        board.reveal(2, 2);
+        board.reveal(2, 3);
+        assertTrue(board.moveBoatTo(2, 0));
+
+        assertTrue(board.moveBoatBy(0, 1));
+        assertEquals(1, board.getBoatCol());
+        assertTrue(board.moveBoatBy(0, -1));
+        assertEquals(0, board.getBoatCol());
+    }
+
+    @Test
+    void reachingHarborStartsReturnVoyage() {
+        boolean[][] grid = {
+            {false, false, false, false, false},
+            {true, true, true, true, true},
+            {false, false, false, false, false}
+        };
+        Board board = new Board(grid);
+
+        board.reveal(0, 0);
+        board.reveal(0, 1);
+        board.reveal(0, 2);
+        board.reveal(0, 3);
+        board.reveal(0, 4);
+
+        assertEquals(Board.GameState.PLAYING, board.getGameState());
+        assertTrue(board.moveBoatTo(0, 0));
+        assertTrue(board.moveBoatTo(0, 1));
+        assertTrue(board.moveBoatTo(0, 2));
+        assertEquals(Board.GameState.PLAYING, board.getGameState());
+
+        assertTrue(board.moveBoatTo(0, 3));
+        assertEquals(Board.GameState.PLAYING, board.getGameState());
+        assertEquals(Board.VoyageStage.RETURNING, board.getVoyageStage());
+    }
+
+    @Test
+    void winRequiresReturningToWestAfterRefuel() {
+        boolean[][] grid = {
+            {false, false, false, false, false},
+            {true, true, true, true, true},
+            {false, false, false, false, false}
+        };
+        Board board = new Board(grid);
+
+        board.reveal(0, 0);
+        board.reveal(0, 1);
+        board.reveal(0, 2);
+        board.reveal(0, 3);
+        board.reveal(0, 4);
+
+        assertTrue(board.moveBoatTo(0, 0));
+        assertTrue(board.moveBoatTo(0, 1));
+        assertTrue(board.moveBoatTo(0, 2));
+        assertTrue(board.moveBoatTo(0, 3));
+        assertEquals(Board.VoyageStage.RETURNING, board.getVoyageStage());
+
+        assertTrue(board.moveBoatTo(0, 2));
+        assertTrue(board.moveBoatTo(0, 1));
+        assertEquals(Board.GameState.PLAYING, board.getGameState());
+
+        assertTrue(board.moveBoatTo(0, 0));
         assertEquals(Board.GameState.WON, board.getGameState());
     }
 
     @Test
-    void gameOverWhenMineRevealed() {
-        // 3×3 board, mine at (0,0). Revealing the mine causes LOST.
+    void generatedBoardsAlwaysLeaveAtLeastOneFullSafeCrossingLane() {
+        Board board = new Board(8, 18, 24, 0, new Random(0L));
+
+        board.reveal(4, 4);
+
+        boolean foundSafeLane = false;
+        for (int row = 0; row < board.getRows(); row++) {
+            boolean safeLane = true;
+            for (int col = 0; col < board.getCols(); col++) {
+                if (board.getCell(row, col).isMine()) {
+                    safeLane = false;
+                    break;
+                }
+            }
+            if (safeLane) {
+                foundSafeLane = true;
+                break;
+            }
+        }
+
+        assertTrue(foundSafeLane);
+    }
+
+    @Test
+    void clearingRevealedRouteWithoutMovingBoatDoesNotWin() {
         boolean[][] grid = {
-            {true,  false, false},
+            {false, false, false, false},
+            {true, true, true, true},
+            {false, false, false, false}
+        };
+        Board board = new Board(grid);
+
+        board.reveal(0, 0);
+        board.reveal(0, 1);
+        board.reveal(0, 2);
+        board.reveal(0, 3);
+
+        assertEquals(Board.GameState.PLAYING, board.getGameState());
+        assertTrue(board.isBoatDocked());
+    }
+
+    @Test
+    void gameOverWhenMineRevealed() {
+        boolean[][] grid = {
+            {true, false, false},
             {false, false, false},
             {false, false, false}
         };
         Board board = new Board(grid);
+
         board.reveal(0, 0);
+
         assertEquals(Board.GameState.LOST, board.getGameState());
     }
 
     @Test
     void noActionsAfterGameOver() {
-        // 3×3 board, mine at (0,0). After losing, toggling a flag has no effect.
         boolean[][] grid = {
-            {true,  false, false},
+            {true, false, false},
             {false, false, false},
             {false, false, false}
         };
         Board board = new Board(grid);
+
         board.reveal(0, 0);
-        assertEquals(Board.GameState.LOST, board.getGameState());
         Cell.State stateBefore = board.getCell(1, 1).getState();
         board.toggleFlag(1, 1);
+
         assertEquals(stateBefore, board.getCell(1, 1).getState());
+        assertFalse(board.moveBoatTo(1, 1));
     }
 
     @Test
     void adjacentMineCountsAreCorrect() {
         Board board = new Board(9, 9, 10);
         board.reveal(4, 4);
+
         for (int r = 0; r < 9; r++) {
             for (int c = 0; c < 9; c++) {
                 if (!board.getCell(r, c).isMine()) {
                     int expected = 0;
                     for (int dr = -1; dr <= 1; dr++) {
                         for (int dc = -1; dc <= 1; dc++) {
-                            int nr = r + dr, nc = c + dc;
-                            if (nr >= 0 && nr < 9 && nc >= 0 && nc < 9
-                                    && board.getCell(nr, nc).isMine()) {
+                            int nr = r + dr;
+                            int nc = c + dc;
+                            if (nr >= 0 && nr < 9 && nc >= 0 && nc < 9 && board.getCell(nr, nc).isMine()) {
                                 expected++;
                             }
                         }
                     }
-                    assertEquals(expected, board.getCell(r, c).getAdjacentMines(),
-                        "Adjacent count mismatch at (" + r + "," + c + ")");
+                    assertEquals(expected, board.getCell(r, c).getAdjacentMines());
                 }
             }
         }
@@ -216,15 +660,17 @@ class BoardTest {
     @Test
     void triggeredMineCoordsRecordedOnLoss() {
         boolean[][] grid = {
-            {true,  false, false},
+            {true, false, false},
             {false, false, false},
             {false, false, false}
         };
         Board board = new Board(grid);
+
         board.reveal(0, 0);
+
         assertEquals(Board.GameState.LOST, board.getGameState());
-        assertEquals(0, board.getTriggeredRow(), "Triggered row should be 0");
-        assertEquals(0, board.getTriggeredCol(), "Triggered col should be 0");
+        assertEquals(0, board.getTriggeredRow());
+        assertEquals(0, board.getTriggeredCol());
     }
 
     @Test
@@ -236,35 +682,43 @@ class BoardTest {
 
     @Test
     void incorrectlyFlaggedCellBecomesWrongFlagOnLoss() {
-        // Mine at (0,0). Flag a safe cell (1,1) then reveal the mine.
         boolean[][] grid = {
-            {true,  false, false},
+            {true, false, false},
             {false, false, false},
             {false, false, false}
         };
         Board board = new Board(grid);
+
         board.toggleFlag(1, 1);
-        assertEquals(Cell.State.FLAGGED, board.getCell(1, 1).getState());
         board.reveal(0, 0);
+
         assertEquals(Board.GameState.LOST, board.getGameState());
-        assertEquals(Cell.State.WRONG_FLAG, board.getCell(1, 1).getState(),
-            "Incorrectly flagged cell should become WRONG_FLAG after a loss");
+        assertEquals(Cell.State.WRONG_FLAG, board.getCell(1, 1).getState());
     }
 
     @Test
     void correctFlagRemainsFlaggedAfterLoss() {
-        // Mine at (0,0) and (0,1). Flag the mine correctly then reveal the other mine.
         boolean[][] grid = {
-            {true,  true,  false},
+            {true, true, false},
             {false, false, false},
             {false, false, false}
         };
         Board board = new Board(grid);
-        board.toggleFlag(0, 0);  // correct flag on mine
-        board.reveal(0, 1);      // reveal the other mine → loss
+
+        board.toggleFlag(0, 0);
+        board.reveal(0, 1);
+
         assertEquals(Board.GameState.LOST, board.getGameState());
-        // A correctly placed flag should stay FLAGGED, not become WRONG_FLAG
-        assertEquals(Cell.State.FLAGGED, board.getCell(0, 0).getState(),
-            "Correctly placed flag should stay FLAGGED after a loss");
+        assertEquals(Cell.State.FLAGGED, board.getCell(0, 0).getState());
+    }
+
+    private static boolean isAtLeastTwoCellsFromBoat(Board board, Board.MineLayerPosition position) {
+        int boatRow = board.getBoatRow();
+        int boatLeft = board.getBoatCol();
+        int boatRight = boatLeft + 1;
+        int closestCol = Math.max(boatLeft, Math.min(position.getCol(), boatRight));
+        int rowDistance = Math.abs(position.getRow() - boatRow);
+        int colDistance = Math.abs(position.getCol() - closestCol);
+        return Math.max(rowDistance, colDistance) >= 2;
     }
 }
