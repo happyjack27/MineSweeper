@@ -3,11 +3,20 @@ package minesweeper;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
-
+import java.util.HashMap;
+import java.util.Map;
 /**
  * Swing-based GUI for the Minesweeper game.
  * Supports Beginner (9×9, 10 mines), Intermediate (16×16, 40 mines),
- * and Expert (16×30, 99 mines) difficulty levels.
+ * and Expert (16×30, 99 mines) difficulty levels, plus a custom mode.
+ *
+ * UI improvements over the baseline:
+ *  - Triggered mine is highlighted in red on a loss.
+ *  - Incorrectly flagged cells are shown with a red "✗" on a loss.
+ *  - F2 keyboard shortcut starts a new game.
+ *  - In-memory best-times tracking (per named difficulty).
+ *  - Win dialog shows elapsed time and whether a best time was set.
+ *  - Toolbar has a raised bevel border to match the classic Minesweeper look.
  */
 public class MineSweeperUI extends JFrame {
 
@@ -24,6 +33,7 @@ public class MineSweeperUI extends JFrame {
         new Color(128, 128, 128) // 8 – grey
     };
 
+    private static final Color TRIGGERED_MINE_BG = new Color(255, 80, 80);
     private static final int CELL_SIZE = 32;
 
     private Board board;
@@ -40,13 +50,17 @@ public class MineSweeperUI extends JFrame {
     private int rows;
     private int cols;
     private int mines;
+    private String difficultyKey = "Custom";
+
+    // In-memory best times (seconds) keyed by difficulty label
+    private final Map<String, Integer> bestTimes = new HashMap<>();
 
     public MineSweeperUI() {
         setTitle("MineSweeper");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setResizable(false);
         buildMenuBar();
-        startGame(9, 9, 10);  // Default: Beginner
+        startGame(9, 9, 10, "Beginner");  // Default: Beginner
     }
 
     // -------------------------------------------------------------------------
@@ -57,26 +71,37 @@ public class MineSweeperUI extends JFrame {
         JMenuBar menuBar = new JMenuBar();
         JMenu gameMenu = new JMenu("Game");
 
+        JMenuItem newItem = new JMenuItem("New Game");
+        newItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_F2, 0));
+        newItem.addActionListener(e -> startGame(rows, cols, mines, difficultyKey));
+
         JMenuItem beginnerItem = new JMenuItem("Beginner (9×9, 10 mines)");
-        beginnerItem.addActionListener(e -> startGame(9, 9, 10));
+        beginnerItem.addActionListener(e -> startGame(9, 9, 10, "Beginner"));
 
         JMenuItem intermediateItem = new JMenuItem("Intermediate (16×16, 40 mines)");
-        intermediateItem.addActionListener(e -> startGame(16, 16, 40));
+        intermediateItem.addActionListener(e -> startGame(16, 16, 40, "Intermediate"));
 
         JMenuItem expertItem = new JMenuItem("Expert (16×30, 99 mines)");
-        expertItem.addActionListener(e -> startGame(16, 30, 99));
+        expertItem.addActionListener(e -> startGame(16, 30, 99, "Expert"));
 
         JMenuItem customItem = new JMenuItem("Custom…");
         customItem.addActionListener(e -> showCustomDialog());
 
+        JMenuItem bestTimesItem = new JMenuItem("Best Times…");
+        bestTimesItem.addActionListener(e -> showBestTimesDialog());
+
         JMenuItem exitItem = new JMenuItem("Exit");
         exitItem.addActionListener(e -> System.exit(0));
 
+        gameMenu.add(newItem);
+        gameMenu.addSeparator();
         gameMenu.add(beginnerItem);
         gameMenu.add(intermediateItem);
         gameMenu.add(expertItem);
         gameMenu.addSeparator();
         gameMenu.add(customItem);
+        gameMenu.addSeparator();
+        gameMenu.add(bestTimesItem);
         gameMenu.addSeparator();
         gameMenu.add(exitItem);
 
@@ -107,10 +132,31 @@ public class MineSweeperUI extends JFrame {
                 r = Math.max(5, Math.min(30, r));
                 c = Math.max(5, Math.min(50, c));
                 m = Math.max(1, Math.min(r * c - 9, m));
-                startGame(r, c, m);
+                startGame(r, c, m, "Custom");
             } catch (NumberFormatException ex) {
                 JOptionPane.showMessageDialog(this, "Please enter valid numbers.", "Error", JOptionPane.ERROR_MESSAGE);
             }
+        }
+    }
+
+    private void showBestTimesDialog() {
+        String[] levels = {"Beginner", "Intermediate", "Expert"};
+        StringBuilder sb = new StringBuilder("<html><table>");
+        for (String level : levels) {
+            Integer best = bestTimes.get(level);
+            sb.append("<tr><td><b>").append(level).append("</b></td><td>&nbsp;&nbsp;</td><td align='right'>")
+              .append(best != null ? best + "s" : "–")
+              .append("</td></tr>");
+        }
+        sb.append("</table></html>");
+
+        Object[] options = {"Reset Times", "OK"};
+        int choice = JOptionPane.showOptionDialog(
+            this, sb.toString(), "Best Times",
+            JOptionPane.DEFAULT_OPTION, JOptionPane.PLAIN_MESSAGE,
+            null, options, "OK");
+        if (choice == 0) {
+            bestTimes.clear();
         }
     }
 
@@ -118,10 +164,11 @@ public class MineSweeperUI extends JFrame {
     // Game initialisation
     // -------------------------------------------------------------------------
 
-    private void startGame(int r, int c, int m) {
+    private void startGame(int r, int c, int m, String key) {
         this.rows = r;
         this.cols = c;
         this.mines = m;
+        this.difficultyKey = key;
 
         if (swingTimer != null) {
             swingTimer.stop();
@@ -138,30 +185,37 @@ public class MineSweeperUI extends JFrame {
     }
 
     private void buildUI() {
-        setLayout(new BorderLayout(0, 4));
+        setLayout(new BorderLayout(0, 0));
 
         // ── Top toolbar ──────────────────────────────────────────────────────
         JPanel toolbar = new JPanel(new BorderLayout(10, 0));
-        toolbar.setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 10));
+        toolbar.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createRaisedBevelBorder(),
+            BorderFactory.createEmptyBorder(6, 10, 6, 10)));
 
         mineCountLabel = new JLabel(formatMineCount(board.getRemainingMines()));
         mineCountLabel.setFont(new Font(Font.MONOSPACED, Font.BOLD, 22));
         mineCountLabel.setForeground(Color.RED);
         mineCountLabel.setBackground(Color.BLACK);
         mineCountLabel.setOpaque(true);
-        mineCountLabel.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
+        mineCountLabel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLoweredBevelBorder(),
+            BorderFactory.createEmptyBorder(2, 6, 2, 6)));
 
         resetButton = new JButton("\uD83D\uDE0A");  // 😊
         resetButton.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 20));
         resetButton.setFocusPainted(false);
-        resetButton.addActionListener(e -> startGame(rows, cols, mines));
+        resetButton.setToolTipText("New Game (F2)");
+        resetButton.addActionListener(e -> startGame(rows, cols, mines, difficultyKey));
 
         timerLabel = new JLabel("000");
         timerLabel.setFont(new Font(Font.MONOSPACED, Font.BOLD, 22));
         timerLabel.setForeground(Color.RED);
         timerLabel.setBackground(Color.BLACK);
         timerLabel.setOpaque(true);
-        timerLabel.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
+        timerLabel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLoweredBevelBorder(),
+            BorderFactory.createEmptyBorder(2, 6, 2, 6)));
 
         toolbar.add(mineCountLabel, BorderLayout.WEST);
         toolbar.add(resetButton, BorderLayout.CENTER);
@@ -173,7 +227,9 @@ public class MineSweeperUI extends JFrame {
         // ── Grid panel ───────────────────────────────────────────────────────
         JPanel gridPanel = new JPanel(new GridLayout(rows, cols, 1, 1));
         gridPanel.setBackground(Color.GRAY);
-        gridPanel.setBorder(BorderFactory.createLineBorder(Color.GRAY, 1));
+        gridPanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createEmptyBorder(4, 6, 6, 6),
+            BorderFactory.createLineBorder(Color.GRAY, 1)));
 
         buttons = new JButton[rows][cols];
         for (int r = 0; r < rows; r++) {
@@ -268,6 +324,7 @@ public class MineSweeperUI extends JFrame {
             case WON:
                 resetButton.setText("\uD83D\uDE0E");  // 😎
                 swingTimer.stop();
+                onGameWon();
                 break;
             case LOST:
                 resetButton.setText("\uD83D\uDE35");  // 😵
@@ -276,6 +333,25 @@ public class MineSweeperUI extends JFrame {
             default:
                 resetButton.setText("\uD83D\uDE0A");  // 😊
         }
+    }
+
+    private void onGameWon() {
+        boolean newBest = false;
+        if (!"Custom".equals(difficultyKey)) {
+            Integer previous = bestTimes.get(difficultyKey);
+            if (previous == null || elapsedSeconds < previous) {
+                bestTimes.put(difficultyKey, elapsedSeconds);
+                newBest = true;
+            }
+        }
+
+        String message = newBest
+            ? String.format("You won in %d seconds!\nNew best time for %s!", elapsedSeconds, difficultyKey)
+            : String.format("You won in %d seconds!", elapsedSeconds);
+
+        // Show the dialog after a short delay so the board can repaint first
+        SwingUtilities.invokeLater(() ->
+            JOptionPane.showMessageDialog(this, message, "Congratulations! \uD83C\uDF89", JOptionPane.PLAIN_MESSAGE));
     }
 
     private void renderCell(int row, int col) {
@@ -298,6 +374,12 @@ public class MineSweeperUI extends JFrame {
                 btn.setForeground(Color.MAGENTA);
                 btn.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 14));
                 break;
+            case WRONG_FLAG:
+                styleRevealedButton(btn, cell, row, col);
+                btn.setText("\u2716");  // ✖ (wrong flag indicator)
+                btn.setForeground(Color.RED);
+                btn.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 16));
+                break;
             case REVEALED:
                 styleRevealedButton(btn, cell, row, col);
                 break;
@@ -312,7 +394,13 @@ public class MineSweeperUI extends JFrame {
 
     private void styleRevealedButton(JButton btn, Cell cell, int row, int col) {
         btn.setBorder(BorderFactory.createLineBorder(new Color(128, 128, 128), 1));
-        btn.setBackground(new Color(210, 210, 210));
+
+        if (cell.isMine() && row == board.getTriggeredRow() && col == board.getTriggeredCol()) {
+            // Highlight the mine that triggered the loss in red
+            btn.setBackground(TRIGGERED_MINE_BG);
+        } else {
+            btn.setBackground(new Color(210, 210, 210));
+        }
 
         if (cell.isMine()) {
             btn.setText("\uD83D\uDCA3");  // 💣

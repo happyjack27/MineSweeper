@@ -212,4 +212,59 @@ class BoardTest {
             }
         }
     }
+
+    @Test
+    void triggeredMineCoordsRecordedOnLoss() {
+        boolean[][] grid = {
+            {true,  false, false},
+            {false, false, false},
+            {false, false, false}
+        };
+        Board board = new Board(grid);
+        board.reveal(0, 0);
+        assertEquals(Board.GameState.LOST, board.getGameState());
+        assertEquals(0, board.getTriggeredRow(), "Triggered row should be 0");
+        assertEquals(0, board.getTriggeredCol(), "Triggered col should be 0");
+    }
+
+    @Test
+    void triggeredMineCoordsDefaultToMinusOneBeforeGameStart() {
+        Board board = new Board(9, 9, 10);
+        assertEquals(-1, board.getTriggeredRow());
+        assertEquals(-1, board.getTriggeredCol());
+    }
+
+    @Test
+    void incorrectlyFlaggedCellBecomesWrongFlagOnLoss() {
+        // Mine at (0,0). Flag a safe cell (1,1) then reveal the mine.
+        boolean[][] grid = {
+            {true,  false, false},
+            {false, false, false},
+            {false, false, false}
+        };
+        Board board = new Board(grid);
+        board.toggleFlag(1, 1);
+        assertEquals(Cell.State.FLAGGED, board.getCell(1, 1).getState());
+        board.reveal(0, 0);
+        assertEquals(Board.GameState.LOST, board.getGameState());
+        assertEquals(Cell.State.WRONG_FLAG, board.getCell(1, 1).getState(),
+            "Incorrectly flagged cell should become WRONG_FLAG after a loss");
+    }
+
+    @Test
+    void correctFlagRemainsFlaggedAfterLoss() {
+        // Mine at (0,0) and (0,1). Flag the mine correctly then reveal the other mine.
+        boolean[][] grid = {
+            {true,  true,  false},
+            {false, false, false},
+            {false, false, false}
+        };
+        Board board = new Board(grid);
+        board.toggleFlag(0, 0);  // correct flag on mine
+        board.reveal(0, 1);      // reveal the other mine → loss
+        assertEquals(Board.GameState.LOST, board.getGameState());
+        // A correctly placed flag should stay FLAGGED, not become WRONG_FLAG
+        assertEquals(Cell.State.FLAGGED, board.getCell(0, 0).getState(),
+            "Correctly placed flag should stay FLAGGED after a loss");
+    }
 }

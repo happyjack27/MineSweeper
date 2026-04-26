@@ -1,7 +1,9 @@
 package minesweeper;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.List;
 
 /**
@@ -24,6 +26,8 @@ public class Board {
     private int revealedCount;
     private int flaggedCount;
     private int placedMines;  // actual mines placed (may be < totalMines on tiny boards)
+    private int triggeredRow = -1;
+    private int triggeredCol = -1;
 
     public Board(int rows, int cols, int totalMines) {
         this.rows = rows;
@@ -137,6 +141,8 @@ public class Board {
 
         if (cell.isMine()) {
             cell.setState(Cell.State.REVEALED);
+            triggeredRow = row;
+            triggeredCol = col;
             gameState = GameState.LOST;
             revealAllMines(row, col);
             return;
@@ -147,23 +153,32 @@ public class Board {
     }
 
     /**
-     * Flood-fill reveal: reveals cell and, if it has 0 adjacent mines, recursively reveals neighbours.
+     * Iterative flood-fill reveal: reveals cell and, if it has 0 adjacent mines,
+     * enqueues all neighbours for the same treatment.  Using an iterative approach
+     * avoids stack-overflow on large open boards.
      */
-    private void floodReveal(int row, int col) {
-        if (row < 0 || row >= rows || col < 0 || col >= cols) {
-            return;
-        }
-        Cell cell = cells[row][col];
-        if (cell.isRevealed() || cell.isFlagged() || cell.isMine()) {
-            return;
-        }
-        cell.setState(Cell.State.REVEALED);
-        revealedCount++;
-        if (cell.getAdjacentMines() == 0) {
-            for (int dr = -1; dr <= 1; dr++) {
-                for (int dc = -1; dc <= 1; dc++) {
-                    if (dr != 0 || dc != 0) {
-                        floodReveal(row + dr, col + dc);
+    private void floodReveal(int startRow, int startCol) {
+        Deque<int[]> queue = new ArrayDeque<>();
+        queue.add(new int[]{startRow, startCol});
+        while (!queue.isEmpty()) {
+            int[] pos = queue.poll();
+            int row = pos[0];
+            int col = pos[1];
+            if (row < 0 || row >= rows || col < 0 || col >= cols) {
+                continue;
+            }
+            Cell cell = cells[row][col];
+            if (cell.isRevealed() || cell.isFlagged() || cell.isMine()) {
+                continue;
+            }
+            cell.setState(Cell.State.REVEALED);
+            revealedCount++;
+            if (cell.getAdjacentMines() == 0) {
+                for (int dr = -1; dr <= 1; dr++) {
+                    for (int dc = -1; dc <= 1; dc++) {
+                        if (dr != 0 || dc != 0) {
+                            queue.add(new int[]{row + dr, col + dc});
+                        }
                     }
                 }
             }
@@ -239,14 +254,15 @@ public class Board {
         for (int r = 0; r < rows; r++) {
             for (int c = 0; c < cols; c++) {
                 Cell cell = cells[r][c];
-                if (cell.isMine() && !cell.isRevealed()) {
+                // Reveal un-flagged, un-revealed mines (skip the triggered cell – already REVEALED)
+                if (cell.isMine() && !cell.isRevealed() && !cell.isFlagged()) {
                     if (!(r == triggeredRow && c == triggeredCol)) {
                         cell.setState(Cell.State.REVEALED);
                     }
                 }
-                // Mark incorrectly placed flags
+                // Mark incorrectly placed flags so the UI can render them distinctly
                 if (cell.isFlagged() && !cell.isMine()) {
-                    cell.setState(Cell.State.REVEALED);
+                    cell.setState(Cell.State.WRONG_FLAG);
                 }
             }
         }
@@ -274,6 +290,8 @@ public class Board {
     public int getTotalMines() { return totalMines; }
     public Cell getCell(int row, int col) { return cells[row][col]; }
     public GameState getGameState() { return gameState; }
+    public int getTriggeredRow() { return triggeredRow; }
+    public int getTriggeredCol() { return triggeredCol; }
     public int getRemainingMines() {
         int base = (gameState == GameState.WAITING) ? totalMines : placedMines;
         return base - flaggedCount;
