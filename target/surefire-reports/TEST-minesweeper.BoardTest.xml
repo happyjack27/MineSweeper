@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report-3.0.xsd" version="3.0" name="minesweeper.BoardTest" time="0.082" tests="14" errors="0" skipped="0" failures="0">
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report-3.0.xsd" version="3.0" name="minesweeper.BoardTest" time="0.083" tests="14" errors="0" skipped="0" failures="0">
   <properties>
     <property name="java.specification.version" value="17"/>
     <property name="sun.jnu.encoding" value="UTF-8"/>
@@ -11,7 +11,7 @@
     <property name="java.vm.specification.version" value="17"/>
     <property name="sun.java.launcher" value="SUN_STANDARD"/>
     <property name="sun.boot.library.path" value="/usr/lib/jvm/temurin-17-jdk-amd64/lib"/>
-    <property name="sun.java.command" value="/home/runner/work/MineSweeper/MineSweeper/target/surefire/surefirebooter-20260426165149816_3.jar /home/runner/work/MineSweeper/MineSweeper/target/surefire 2026-04-26T16-51-49_726-jvmRun1 surefire-20260426165149816_1tmp surefire_0-20260426165149816_2tmp"/>
+    <property name="sun.java.command" value="/home/runner/work/MineSweeper/MineSweeper/target/surefire/surefirebooter-20260426165810313_3.jar /home/runner/work/MineSweeper/MineSweeper/target/surefire 2026-04-26T16-58-09_904-jvmRun1 surefire-20260426165810313_1tmp surefire_0-20260426165810313_2tmp"/>
     <property name="jdk.debug" value="release"/>
     <property name="surefire.test.class.path" value="/home/runner/work/MineSweeper/MineSweeper/target/test-classes:/home/runner/work/MineSweeper/MineSweeper/target/classes:/home/runner/.m2/repository/org/junit/jupiter/junit-jupiter/5.10.2/junit-jupiter-5.10.2.jar:/home/runner/.m2/repository/org/junit/jupiter/junit-jupiter-api/5.10.2/junit-jupiter-api-5.10.2.jar:/home/runner/.m2/repository/org/opentest4j/opentest4j/1.3.0/opentest4j-1.3.0.jar:/home/runner/.m2/repository/org/junit/platform/junit-platform-commons/1.10.2/junit-platform-commons-1.10.2.jar:/home/runner/.m2/repository/org/apiguardian/apiguardian-api/1.1.2/apiguardian-api-1.1.2.jar:/home/runner/.m2/repository/org/junit/jupiter/junit-jupiter-params/5.10.2/junit-jupiter-params-5.10.2.jar:/home/runner/.m2/repository/org/junit/jupiter/junit-jupiter-engine/5.10.2/junit-jupiter-engine-5.10.2.jar:/home/runner/.m2/repository/org/junit/platform/junit-platform-engine/1.10.2/junit-platform-engine-1.10.2.jar:"/>
     <property name="sun.cpu.endian" value="little"/>
@@ -26,7 +26,7 @@
     <property name="line.separator" value="&#10;"/>
     <property name="java.vm.specification.vendor" value="Oracle Corporation"/>
     <property name="java.specification.name" value="Java Platform API Specification"/>
-    <property name="surefire.real.class.path" value="/home/runner/work/MineSweeper/MineSweeper/target/surefire/surefirebooter-20260426165149816_3.jar"/>
+    <property name="surefire.real.class.path" value="/home/runner/work/MineSweeper/MineSweeper/target/surefire/surefirebooter-20260426165810313_3.jar"/>
     <property name="sun.management.compiler" value="HotSpot 64-Bit Tiered Compilers"/>
     <property name="java.runtime.version" value="17.0.18+8"/>
     <property name="user.name" value="runner"/>
@@ -52,18 +52,18 @@
     <property name="sun.io.unicode.encoding" value="UnicodeLittle"/>
     <property name="java.class.version" value="61.0"/>
   </properties>
-  <testcase name="flaggedCellCannotBeRevealed" classname="minesweeper.BoardTest" time="0.023"/>
-  <testcase name="totalMinesCountIsCorrect" classname="minesweeper.BoardTest" time="0.002"/>
+  <testcase name="flaggedCellCannotBeRevealed" classname="minesweeper.BoardTest" time="0.025"/>
+  <testcase name="totalMinesCountIsCorrect" classname="minesweeper.BoardTest" time="0.001"/>
   <testcase name="noActionsAfterGameOver" classname="minesweeper.BoardTest" time="0.001"/>
-  <testcase name="adjacentMineCountsAreCorrect" classname="minesweeper.BoardTest" time="0.006"/>
-  <testcase name="firstClickTransitionsToPlaying" classname="minesweeper.BoardTest" time="0.002"/>
+  <testcase name="adjacentMineCountsAreCorrect" classname="minesweeper.BoardTest" time="0.008"/>
+  <testcase name="firstClickTransitionsToPlaying" classname="minesweeper.BoardTest" time="0.001"/>
   <testcase name="revealedCellStateIsRevealed" classname="minesweeper.BoardTest" time="0.001"/>
-  <testcase name="winOnSmallBoardWithOneMine" classname="minesweeper.BoardTest" time="0.0"/>
+  <testcase name="winOnSmallBoardWithOneMine" classname="minesweeper.BoardTest" time="0.001"/>
   <testcase name="flagTogglesState" classname="minesweeper.BoardTest" time="0.001"/>
   <testcase name="gameOverWhenMineRevealed" classname="minesweeper.BoardTest" time="0.001"/>
   <testcase name="allCellsHiddenAtStart" classname="minesweeper.BoardTest" time="0.001"/>
-  <testcase name="initialStateIsWaiting" classname="minesweeper.BoardTest" time="0.0"/>
+  <testcase name="initialStateIsWaiting" classname="minesweeper.BoardTest" time="0.001"/>
   <testcase name="firstClickNeighboursAreNeverMines" classname="minesweeper.BoardTest" time="0.004"/>
-  <testcase name="remainingMinesCountUpdatesWithFlags" classname="minesweeper.BoardTest" time="0.0"/>
-  <testcase name="firstClickCellIsNeverAMine" classname="minesweeper.BoardTest" time="0.006"/>
+  <testcase name="remainingMinesCountUpdatesWithFlags" classname="minesweeper.BoardTest" time="0.001"/>
+  <testcase name="firstClickCellIsNeverAMine" classname="minesweeper.BoardTest" time="0.005"/>
 </testsuite>
