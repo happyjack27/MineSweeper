@@ -121,6 +121,35 @@ class BoardTest {
         assertEquals(Cell.State.REVEALED, board.getCell(0, 2).getState());
         assertEquals(Cell.State.FLAGGED, board.getCell(0, 0).getState());
     }
+
+    @Test
+    void chordFlagsRemainingHiddenNeighborsWhenTheyMustAllBeMines() {
+        boolean[][] grid = {
+            {true, true, true},
+            {false, false, false},
+            {false, false, false}
+        };
+        Board board = new Board(grid);
+
+        board.reveal(1, 1);
+        board.reveal(1, 0);
+        board.reveal(1, 2);
+        board.reveal(2, 0);
+        board.reveal(2, 1);
+        board.reveal(2, 2);
+
+        board.chord(1, 1);
+
+        assertEquals(Cell.State.FLAGGED, board.getCell(0, 0).getState());
+        assertEquals(Cell.State.FLAGGED, board.getCell(0, 1).getState());
+        assertEquals(Cell.State.FLAGGED, board.getCell(0, 2).getState());
+        assertEquals(0, board.getRemainingMines());
+
+        board.toggleFlag(0, 0);
+
+        assertEquals(1, board.getRemainingMines());
+    }
+
     @Test
     void remainingMinesCountUpdatesWithFlags() {
         boolean[][] grid = {

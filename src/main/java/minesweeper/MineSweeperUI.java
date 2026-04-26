@@ -55,13 +55,17 @@ public class MineSweeperUI extends JFrame {
     private static final int BOAT_ANIMATION_DELAY_MS = 16;
     private static final float BOAT_ANIMATION_STEP = 0.18f;
     private static final int HARBOR_SEQUENCE_DELAY_MS = 40;
-    private static final float HARBOR_DOCKING_STEP = 0.16f;
-    private static final float HARBOR_REFUEL_STEP = 0.08f;
+    private static final float HARBOR_DOCKING_STEP = 0.1f;
+    private static final float HARBOR_MOORING_STEP = 0.14f;
+    private static final float HARBOR_REFUEL_STEP = 0.06f;
+    private static final float WEST_DOCK_CELEBRATION_STEP = 0.09f;
     private static final int MISSILE_ANIMATION_DELAY_MS = 16;
     private static final float MISSILE_FLIGHT_STEP = 0.12f;
     private static final float MISSILE_EXPLOSION_STEP = 0.14f;
     private static final int MINELAYER_STEP_DELAY_MS = 1350;
     private static final int DEFAULT_MINELAYER_COUNT = 2;
+    private static final int TANKER_MINELAYER_COUNT = 2;
+    private static final int BREAKER_MINELAYER_COUNT = 3;
     private static final int MAX_MINELAYER_COUNT = 6;
 
     private Board board;
@@ -122,7 +126,7 @@ public class MineSweeperUI extends JFrame {
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setResizable(false);
         buildMenuBar();
-        startGame(10, 24, 44, mineLayerCount, LEVEL_TANKER);
+        startGame(10, 24, 44, TANKER_MINELAYER_COUNT, LEVEL_TANKER);
         SwingUtilities.invokeLater(this::showOpeningInstructions);
     }
 
@@ -141,11 +145,11 @@ public class MineSweeperUI extends JFrame {
         JMenuItem beginnerItem = new JMenuItem(LEVEL_ESCORT + " (7×14, 10 mines, 0 ships)");
         beginnerItem.addActionListener(e -> startGame(7, 14, 10, 0, LEVEL_ESCORT));
 
-        JMenuItem intermediateItem = new JMenuItem(LEVEL_TANKER + " (10×24, 44 mines)");
-        intermediateItem.addActionListener(e -> startGame(10, 24, 44, mineLayerCount, LEVEL_TANKER));
+        JMenuItem intermediateItem = new JMenuItem(LEVEL_TANKER + " (10×24, 44 mines, 2 ships)");
+        intermediateItem.addActionListener(e -> startGame(10, 24, 44, TANKER_MINELAYER_COUNT, LEVEL_TANKER));
 
-        JMenuItem expertItem = new JMenuItem(LEVEL_BREAKER + " (12×30, 76 mines)");
-        expertItem.addActionListener(e -> startGame(12, 30, 76, mineLayerCount, LEVEL_BREAKER));
+        JMenuItem expertItem = new JMenuItem(LEVEL_BREAKER + " (12×30, 76 mines, 3 ships)");
+        expertItem.addActionListener(e -> startGame(12, 30, 76, BREAKER_MINELAYER_COUNT, LEVEL_BREAKER));
 
         JMenuItem customItem = new JMenuItem("Custom…");
         customItem.addActionListener(e -> showCustomDialog());
@@ -953,6 +957,8 @@ public class MineSweeperUI extends JFrame {
 
             if (harborSequence.dockingProgress < 1f) {
                 harborSequence.dockingProgress = Math.min(1f, harborSequence.dockingProgress + HARBOR_DOCKING_STEP);
+            } else if (harborSequence.mooringProgress < 1f) {
+                harborSequence.mooringProgress = Math.min(1f, harborSequence.mooringProgress + HARBOR_MOORING_STEP);
             } else {
                 harborSequence.refuelProgress = Math.min(1f, harborSequence.refuelProgress + HARBOR_REFUEL_STEP);
             }
@@ -984,8 +990,10 @@ public class MineSweeperUI extends JFrame {
 
             if (westDockSequence.dockingProgress < 1f) {
                 westDockSequence.dockingProgress = Math.min(1f, westDockSequence.dockingProgress + HARBOR_DOCKING_STEP);
+            } else if (westDockSequence.mooringProgress < 1f) {
+                westDockSequence.mooringProgress = Math.min(1f, westDockSequence.mooringProgress + HARBOR_MOORING_STEP);
             } else {
-                westDockSequence.celebrationProgress = Math.min(1f, westDockSequence.celebrationProgress + HARBOR_REFUEL_STEP);
+                westDockSequence.celebrationProgress = Math.min(1f, westDockSequence.celebrationProgress + WEST_DOCK_CELEBRATION_STEP);
             }
 
             if (boatOverlay != null) {
@@ -1490,11 +1498,13 @@ public class MineSweeperUI extends JFrame {
 
     private static final class HarborSequence {
         private float dockingProgress;
+        private float mooringProgress;
         private float refuelProgress;
     }
 
     private static final class WestDockSequence {
         private float dockingProgress;
+        private float mooringProgress;
         private float celebrationProgress;
     }
 
@@ -1563,14 +1573,16 @@ public class MineSweeperUI extends JFrame {
             try {
                 enableQuality(g);
                 float dockOffset = 0f;
+                float verticalBob = 0f;
                 if (harborSequence != null) {
-                    dockOffset = harborSequence.dockingProgress * 6f;
+                    dockOffset = easeOut(harborSequence.dockingProgress) * 11f;
+                    verticalBob = (1f - harborSequence.dockingProgress) * 2.4f;
                 } else if (westDockSequence != null) {
-                    dockOffset = -westDockSequence.dockingProgress * 6f;
+                    dockOffset = -easeOut(westDockSequence.dockingProgress) * 11f;
+                    verticalBob = (1f - westDockSequence.dockingProgress) * 1.8f;
                 }
-                g.translate(currentX + dockOffset, currentY);
-                g.setColor(new Color(255, 255, 255, 56));
-                g.fill(new RoundRectangle2D.Double(1, 1, CELL_SIZE * 2 - 2, CELL_SIZE - 2, 16, 16));
+                g.translate(currentX + dockOffset, currentY + verticalBob);
+                paintArrivalWater(g);
                 paintBoat(g, CELL_SIZE * 2, CELL_SIZE);
                 if (harborSequence != null) {
                     paintHarborRefuelEffect(g, harborSequence);
@@ -1583,54 +1595,122 @@ public class MineSweeperUI extends JFrame {
         }
 
         private void paintHarborRefuelEffect(Graphics2D g, HarborSequence sequence) {
-            float clampDocking = Math.max(0f, Math.min(1f, sequence.dockingProgress));
-            float clampRefuel = Math.max(0f, Math.min(1f, sequence.refuelProgress));
+            float clampDocking = clamp(sequence.dockingProgress);
+            float clampMooring = clamp(sequence.mooringProgress);
+            float clampRefuel = clamp(sequence.refuelProgress);
 
-            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.45f + 0.35f * clampDocking));
-            g.setColor(new Color(231, 241, 245));
+            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.3f + 0.35f * clampDocking));
+            g.setColor(new Color(235, 240, 232));
+            g.fill(new RoundRectangle2D.Float(CELL_SIZE * 2 - 4f, 2f, 10f, CELL_SIZE - 4f, 6f, 6f));
+
+            g.setColor(new Color(213, 197, 165));
+            g.fill(new RoundRectangle2D.Float(CELL_SIZE * 2 + 3f, 0f, 12f, CELL_SIZE, 6f, 6f));
+            g.setColor(new Color(150, 125, 92));
+            g.fill(new RoundRectangle2D.Float(CELL_SIZE * 2 + 7f, 4f, 4f, CELL_SIZE - 8f, 3f, 3f));
+
+            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.4f + 0.45f * clampMooring));
+            g.setColor(new Color(59, 66, 72));
             g.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-            g.drawLine(CELL_SIZE * 2 - 10, 7, CELL_SIZE * 2 + 10, 2);
-            g.drawLine(CELL_SIZE * 2 - 10, CELL_SIZE - 8, CELL_SIZE * 2 + 10, CELL_SIZE - 3);
+            g.drawLine(CELL_SIZE * 2 - 14, 7, CELL_SIZE * 2 - 28, 6);
+            g.drawLine(CELL_SIZE * 2 - 12, CELL_SIZE - 8, CELL_SIZE * 2 - 28, CELL_SIZE - 6);
 
-            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.7f));
-            g.setColor(new Color(61, 70, 76));
-            g.setStroke(new BasicStroke(4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-            g.drawLine(CELL_SIZE * 2 - 17, 6, CELL_SIZE * 2 - 9, 10);
+            if (clampMooring > 0f) {
+                g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.45f + 0.45f * clampMooring));
+                g.setColor(new Color(79, 87, 94));
+                g.setStroke(new BasicStroke(4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g.drawLine(CELL_SIZE * 2 - 18, 8, CELL_SIZE * 2 - 8, 11);
 
-            if (clampDocking >= 1f) {
-                g.setColor(new Color(34, 42, 46));
+                float hoseEndX = CELL_SIZE * 2 - 16f + 8f * clampMooring;
+                float hoseEndY = 8f + 2f * clampMooring;
+                g.setColor(new Color(41, 46, 52));
+                g.draw(new java.awt.geom.QuadCurve2D.Float(
+                    CELL_SIZE * 2 + 8f,
+                    10f,
+                    CELL_SIZE * 2 + 1f,
+                    4f,
+                    hoseEndX,
+                    hoseEndY));
+            }
+
+            if (clampRefuel > 0f) {
+                g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.7f));
+                g.setColor(new Color(191, 138, 47, 225));
+                float fillWidth = Math.max(0f, (CELL_SIZE * 2 - 24f) * clampRefuel);
+                g.fill(new RoundRectangle2D.Float(12f, CELL_SIZE - 14f, fillWidth, 6f, 5f, 5f));
+
+                g.setColor(new Color(255, 220, 128, 170));
+                float glowRadius = 10f + 10f * clampRefuel;
+                g.fill(new Ellipse2D.Float(CELL_SIZE * 2 - glowRadius / 2f - 12f, 3f, glowRadius, glowRadius));
+
+                g.setColor(new Color(245, 201, 90, 190));
                 g.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                g.drawLine(CELL_SIZE * 2 - 14, 6, CELL_SIZE * 2 - 28, 8);
-
-                g.setColor(new Color(191, 138, 47, 210));
-                float fillWidth = Math.max(0f, (CELL_SIZE * 2 - 28f) * clampRefuel);
-                g.fill(new RoundRectangle2D.Float(14, CELL_SIZE - 13, fillWidth, 5f, 4f, 4f));
-
-                g.setColor(new Color(255, 219, 123, 190));
-                g.fill(new Ellipse2D.Float(CELL_SIZE * 2 - 19, 4f, 10f, 10f));
+                g.drawArc(CELL_SIZE * 2 - 28, -2, 18, 10, 25, 130);
+                g.drawArc(CELL_SIZE * 2 - 18, -4, 16, 9, 20, 120);
             }
         }
 
         private void paintWestDockArrivalEffect(Graphics2D g, WestDockSequence sequence) {
-            float clampDocking = Math.max(0f, Math.min(1f, sequence.dockingProgress));
-            float clampCelebration = Math.max(0f, Math.min(1f, sequence.celebrationProgress));
+            float clampDocking = clamp(sequence.dockingProgress);
+            float clampMooring = clamp(sequence.mooringProgress);
+            float clampCelebration = clamp(sequence.celebrationProgress);
 
-            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.45f + 0.25f * clampDocking));
-            g.setColor(new Color(222, 213, 194));
+            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.35f + 0.35f * clampDocking));
+            g.setColor(new Color(190, 158, 118));
+            g.fill(new RoundRectangle2D.Float(-14f, 1f, 12f, CELL_SIZE - 2f, 6f, 6f));
+            g.setColor(new Color(121, 88, 56));
+            g.fill(new RoundRectangle2D.Float(-10f, 4f, 4f, CELL_SIZE - 8f, 3f, 3f));
+
+            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.35f + 0.5f * clampMooring));
+            g.setColor(new Color(73, 60, 47));
             g.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-            g.drawLine(2, 6, -10, 2);
-            g.drawLine(2, CELL_SIZE - 7, -10, CELL_SIZE - 3);
+            g.drawLine(6, 7, -6, 5);
+            g.drawLine(9, CELL_SIZE - 8, -6, CELL_SIZE - 6);
 
-            if (clampDocking >= 1f) {
-                g.setColor(new Color(208, 180, 103, 210));
-                g.fill(new Ellipse2D.Float(5f, 4f, 10f, 10f));
-
+            if (clampCelebration > 0f) {
                 g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.35f + 0.45f * clampCelebration));
                 g.setColor(new Color(255, 230, 157));
                 g.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                g.drawArc(6, -2, 20, 12, 15, 150);
-                g.drawArc(18, -4, 18, 10, 5, 150);
+                g.drawArc(4, -2, 20, 12, 20, 150);
+                g.drawArc(15, -5, 18, 10, 8, 145);
+
+                g.setColor(new Color(255, 238, 178, 175));
+                g.fill(new Ellipse2D.Float(4f, 3f, 12f, 12f));
+
+                g.setColor(new Color(226, 194, 99, 190));
+                float pennantHeight = 10f + 6f * clampCelebration;
+                Path2D pennant = new Path2D.Float();
+                pennant.moveTo(4, 3);
+                pennant.lineTo(4, 3 + pennantHeight);
+                pennant.lineTo(12, 6 + pennantHeight * 0.55f);
+                pennant.closePath();
+                g.fill(pennant);
+
+                g.setColor(new Color(158, 63, 42, 205));
+                Path2D pennantTwo = new Path2D.Float();
+                pennantTwo.moveTo(11, 5);
+                pennantTwo.lineTo(11, 5 + pennantHeight * 0.8f);
+                pennantTwo.lineTo(18, 8 + pennantHeight * 0.45f);
+                pennantTwo.closePath();
+                g.fill(pennantTwo);
             }
+        }
+
+        private void paintArrivalWater(Graphics2D g) {
+            g.setColor(new Color(255, 255, 255, 48));
+            g.fill(new RoundRectangle2D.Double(1, 1, CELL_SIZE * 2 - 2, CELL_SIZE - 2, 16, 16));
+            g.setColor(new Color(163, 218, 242, 95));
+            g.fillArc(2, CELL_SIZE - 10, 16, 8, 0, 180);
+            g.fillArc(CELL_SIZE + 6, CELL_SIZE - 10, 16, 8, 0, 180);
+        }
+
+        private float clamp(float value) {
+            return Math.max(0f, Math.min(1f, value));
+        }
+
+        private float easeOut(float value) {
+            float clamped = clamp(value);
+            float inverse = 1f - clamped;
+            return 1f - inverse * inverse;
         }
     }
 

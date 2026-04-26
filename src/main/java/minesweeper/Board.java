@@ -827,6 +827,24 @@ public class Board {
                     }
                 }
             }
+            return;
+        }
+
+        int hiddenUnflagged = countAdjacentHiddenUnflagged(row, col);
+        if (flags + hiddenUnflagged == cell.getAdjacentMines()) {
+            for (int dr = -1; dr <= 1; dr++) {
+                for (int dc = -1; dc <= 1; dc++) {
+                    int nr = row + dr;
+                    int nc = col + dc;
+                    if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+                        Cell neighbour = cells[nr][nc];
+                        if (!neighbour.isRevealed() && !neighbour.isFlagged()) {
+                            neighbour.setState(Cell.State.FLAGGED);
+                            flaggedCount++;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -838,6 +856,23 @@ public class Board {
                 int nc = col + dc;
                 if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && cells[nr][nc].isFlagged()) {
                     count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    private int countAdjacentHiddenUnflagged(int row, int col) {
+        int count = 0;
+        for (int dr = -1; dr <= 1; dr++) {
+            for (int dc = -1; dc <= 1; dc++) {
+                int nr = row + dr;
+                int nc = col + dc;
+                if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+                    Cell cell = cells[nr][nc];
+                    if (!cell.isRevealed() && !cell.isFlagged()) {
+                        count++;
+                    }
                 }
             }
         }
