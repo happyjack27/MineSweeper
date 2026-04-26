@@ -1,10 +1,14 @@
 package minesweeper;
 
 import javax.swing.*;
+import javax.sound.sampled.AudioFormat;
+import javax.sound.sampled.AudioSystem;
+import javax.sound.sampled.SourceDataLine;
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.Path2D;
+import java.awt.geom.QuadCurve2D;
 import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
@@ -40,7 +44,7 @@ public class MineSweeperUI extends JFrame {
     private static final Color REVEALED_CELL_BG = new Color(188, 228, 239);
     private static final Color REVEALED_BORDER = new Color(53, 101, 128);
     private static final Color QUESTION_MARK_COLOR = new Color(84, 0, 140);
-    private static final Color BOAT_CELL_BG = new Color(73, 140, 181);
+    private static final Color BOAT_CELL_BG = new Color(155, 205, 232);
     private static final Color STATUS_BG = new Color(212, 229, 220);
     private static final Color STATUS_FG = new Color(29, 63, 82);
     private static final Color DOCK_BG = new Color(171, 139, 102);
@@ -62,6 +66,7 @@ public class MineSweeperUI extends JFrame {
     private static final int MISSILE_ANIMATION_DELAY_MS = 16;
     private static final float MISSILE_FLIGHT_STEP = 0.12f;
     private static final float MISSILE_EXPLOSION_STEP = 0.14f;
+    private static final int AMBIENT_ANIMATION_DELAY_MS = 33;
     private static final int MINELAYER_STEP_DELAY_MS = 1350;
     private static final int DEFAULT_MINELAYER_COUNT = 2;
     private static final int TANKER_MINELAYER_COUNT = 2;
@@ -78,12 +83,15 @@ public class MineSweeperUI extends JFrame {
     private JButton resetButton;
     private JToggleButton missileButton;
     private JCheckBoxMenuItem missileMenuItem;
+    private JCheckBoxMenuItem soundMenuItem;
+    private JCheckBoxMenuItem showTutorialOnStartupMenuItem;
     private JPanel gridPanel;
     private JLayeredPane boardLayer;
     private BoatOverlay boatOverlay;
     private MissileOverlay missileOverlay;
     private MineLayerOverlay mineLayerOverlay;
     private Timer swingTimer;
+    private Timer ambientAnimationTimer;
     private Timer boatAnimationTimer;
     private Timer harborSequenceTimer;
     private Timer westDockSequenceTimer;
@@ -96,12 +104,15 @@ public class MineSweeperUI extends JFrame {
     private int chordCol = -1;
     private boolean instructionsShown;
     private boolean missileModeArmed;
+    private boolean soundEnabled = true;
+    private boolean showTutorialOnStartup = true;
     private boolean winDialogShown;
     private Board.GameState lastGameState = Board.GameState.WAITING;
     private Board.VoyageStage lastVoyageStage = Board.VoyageStage.OUTBOUND;
     private HarborSequence harborSequence;
     private WestDockSequence westDockSequence;
     private MissileAnimation missileAnimation;
+    private long animationEpochNanos = System.nanoTime();
 
     // Current difficulty settings
     private int rows;
@@ -127,7 +138,7 @@ public class MineSweeperUI extends JFrame {
         setResizable(false);
         buildMenuBar();
         startGame(10, 24, 44, TANKER_MINELAYER_COUNT, LEVEL_TANKER);
-        SwingUtilities.invokeLater(this::showOpeningInstructions);
+        SwingUtilities.invokeLater(() -> showOpeningInstructions(false));
     }
 
     // -------------------------------------------------------------------------
@@ -168,6 +179,9 @@ public class MineSweeperUI extends JFrame {
             updateBoard();
         });
 
+        soundMenuItem = new JCheckBoxMenuItem("Sound Effects", soundEnabled);
+        soundMenuItem.addActionListener(e -> soundEnabled = soundMenuItem.isSelected());
+
         JMenu mineLayerMenu = new JMenu("Enemy Minelayers");
         ButtonGroup mineLayerGroup = new ButtonGroup();
         for (int count = 0; count <= MAX_MINELAYER_COUNT; count++) {
@@ -192,13 +206,27 @@ public class MineSweeperUI extends JFrame {
         gameMenu.addSeparator();
         gameMenu.add(undoItem);
         gameMenu.add(missileMenuItem);
+        gameMenu.add(soundMenuItem);
         gameMenu.addSeparator();
         gameMenu.add(bestTimesItem);
         gameMenu.add(mineLayerMenu);
         gameMenu.addSeparator();
         gameMenu.add(exitItem);
 
+        JMenu helpMenu = new JMenu("Help");
+        JMenuItem tutorialItem = new JMenuItem("How To Play…");
+        tutorialItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_F1, 0));
+        tutorialItem.addActionListener(e -> showOpeningInstructions(true));
+        showTutorialOnStartupMenuItem = new JCheckBoxMenuItem("Show Tutorial on Startup", showTutorialOnStartup);
+        showTutorialOnStartupMenuItem.addActionListener(e -> {
+            showTutorialOnStartup = showTutorialOnStartupMenuItem.isSelected();
+        });
+        helpMenu.add(tutorialItem);
+        helpMenu.addSeparator();
+        helpMenu.add(showTutorialOnStartupMenuItem);
+
         menuBar.add(gameMenu);
+        menuBar.add(helpMenu);
         setJMenuBar(menuBar);
     }
 
@@ -253,29 +281,591 @@ public class MineSweeperUI extends JFrame {
         }
     }
 
-    private void showOpeningInstructions() {
-        if (instructionsShown) {
-            return;
+    private void showOpeningInstructions(boolean manual) {
+        if (!manual) {
+            if (instructionsShown || !showTutorialOnStartup) {
+                return;
+            }
         }
         instructionsShown = true;
 
-        String message =
-            "Objective:\n"
-                + "Escort the ship to the right side, refuel there, then bring it back to the left side.\n\n"
-                + "Ship movement:\n"
-                + "- Launch from a revealed safe cell in the first column.\n"
-                + "- Click any straight revealed channel to move the ship.\n"
-                + "- You can also use the arrow keys to sail.\n\n"
-                + "Voyage:\n"
-                + "- First leg: reach the east harbor.\n"
-                + "- Refuel happens automatically there.\n"
-                + "- Second leg: sail the ship back to the west dock to win.\n\n"
-                + "Minesweeper controls:\n"
-                + "- Left click reveals.\n"
-                + "- Right click marks mines.\n"
-                + "- Double-click or chord a revealed number to open surrounding unmarked cells when the marked mines match.";
+        final String[] pageTitles = {
+            "Welcome to Hormuz Edition",
+            "Minesweeper Controls",
+            "Navigating the Ship",
+            "Firing Missiles",
+            "Victory Conditions"
+        };
 
-        JOptionPane.showMessageDialog(this, message, "How To Play", JOptionPane.INFORMATION_MESSAGE);
+        final String[] pageBodies = {
+            "<html><div style='width:280px'>Escort a tanker through the Strait of Hormuz!<br><br>"
+                + "Clear a safe channel through the minefield, then sail your ship from the "
+                + "<b>west dock</b> all the way to the <b>east harbor</b> \u2014 "
+                + "and bring it safely back to win.</div></html>",
+
+            "<html><div style='width:280px'>"
+                + "<b>Left-click</b> a hidden cell to reveal it.<br>"
+                + "<b>Right-click</b> a hidden cell to flag a suspected mine.<br><br>"
+                + "<b>Double-click</b> (or chord) a revealed number to uncover adjacent "
+                + "cells when the matching mines are already flagged.</div></html>",
+
+            "<html><div style='width:280px'>"
+                + "Click a <b>revealed safe cell in column 1</b> to launch the ship.<br><br>"
+                + "Then click any <b>straight revealed channel</b> or use the "
+                + "<b>arrow keys</b> to sail. The ship travels only through clear, mine-free water."
+                + "</div></html>",
+
+            "<html><div style='width:280px'>"
+                + "Click the <b>missile button</b> (or press <b>M</b>) to arm a strike.<br><br>"
+                + "Then click any <b>hidden cell</b> to destroy it. Each game provides a limited "
+                + "supply \u2014 use them to blast stubborn obstacles off your route."
+                + "</div></html>",
+
+            "<html><div style='width:280px'>"
+                + "<b>Leg 1:</b> Sail to the east harbor to refuel automatically.<br><br>"
+                + "<b>Leg 2:</b> Return the ship to the west dock to win!<br><br>"
+                + "Enemy minelayers patrol the strait and can seal your channel \u2014 "
+                + "clear your path before they do!</div></html>"
+        };
+
+        final int pageCount = pageTitles.length;
+        final int[] currentPage = {0};
+
+        JDialog dialog = new JDialog(this, "How To Play", true);
+        dialog.setResizable(false);
+
+        JPanel graphicPanel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                paintTutorialGraphic((Graphics2D) g, currentPage[0], getWidth(), getHeight());
+            }
+        };
+        graphicPanel.setPreferredSize(new Dimension(384, 155));
+        graphicPanel.setBackground(GRID_WATER_BG);
+
+        JLabel titleLabel = new JLabel(pageTitles[0]);
+        titleLabel.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 15));
+        titleLabel.setForeground(STATUS_FG.darker());
+        titleLabel.setBorder(BorderFactory.createEmptyBorder(10, 14, 4, 14));
+
+        JLabel bodyLabel = new JLabel(pageBodies[0]);
+        bodyLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
+        bodyLabel.setForeground(STATUS_FG);
+        bodyLabel.setBorder(BorderFactory.createEmptyBorder(0, 14, 10, 14));
+
+        JPanel textPanel = new JPanel();
+        textPanel.setLayout(new BoxLayout(textPanel, BoxLayout.Y_AXIS));
+        textPanel.setBackground(STATUS_BG);
+        textPanel.add(titleLabel);
+        textPanel.add(bodyLabel);
+
+        JPanel dotsPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 4));
+        dotsPanel.setBackground(STATUS_BG);
+        JLabel[] dots = new JLabel[pageCount];
+        for (int i = 0; i < pageCount; i++) {
+            dots[i] = new JLabel("\u25cf");
+            dots[i].setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
+            dotsPanel.add(dots[i]);
+        }
+
+        JButton prevButton = new JButton("\u25c4 Back");
+        JButton nextButton = new JButton("Next \u25ba");
+        JButton closeButton = new JButton("Close");
+
+        JCheckBox startupCheckBox = new JCheckBox("Show this tutorial on startup", showTutorialOnStartup);
+        startupCheckBox.setBackground(STATUS_BG);
+        startupCheckBox.setForeground(STATUS_FG);
+        startupCheckBox.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
+        startupCheckBox.addActionListener(e -> {
+            showTutorialOnStartup = startupCheckBox.isSelected();
+            showTutorialOnStartupMenuItem.setSelected(showTutorialOnStartup);
+        });
+
+        Runnable refresh = () -> {
+            int p = currentPage[0];
+            titleLabel.setText(pageTitles[p]);
+            bodyLabel.setText(pageBodies[p]);
+            prevButton.setEnabled(p > 0);
+            nextButton.setEnabled(p < pageCount - 1);
+            for (int i = 0; i < pageCount; i++) {
+                dots[i].setForeground(i == p ? STATUS_FG.darker() : new Color(170, 190, 200));
+            }
+            graphicPanel.repaint();
+        };
+        refresh.run();
+
+        prevButton.addActionListener(e -> {
+            if (currentPage[0] > 0) { currentPage[0]--; refresh.run(); }
+        });
+        nextButton.addActionListener(e -> {
+            if (currentPage[0] < pageCount - 1) { currentPage[0]++; refresh.run(); }
+        });
+        closeButton.addActionListener(e -> dialog.dispose());
+
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 6));
+        buttonPanel.setBackground(STATUS_BG);
+        buttonPanel.add(prevButton);
+        buttonPanel.add(closeButton);
+        buttonPanel.add(nextButton);
+
+        JPanel startupPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 2));
+        startupPanel.setBackground(STATUS_BG);
+        startupPanel.add(startupCheckBox);
+
+        JPanel bottomPanel = new JPanel(new BorderLayout());
+        bottomPanel.setBackground(STATUS_BG);
+        bottomPanel.add(dotsPanel, BorderLayout.NORTH);
+        bottomPanel.add(buttonPanel, BorderLayout.CENTER);
+        bottomPanel.add(startupPanel, BorderLayout.SOUTH);
+
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.add(graphicPanel, BorderLayout.NORTH);
+        mainPanel.add(textPanel, BorderLayout.CENTER);
+        mainPanel.add(bottomPanel, BorderLayout.SOUTH);
+        mainPanel.setBorder(BorderFactory.createLineBorder(REVEALED_BORDER, 2));
+
+        dialog.setContentPane(mainPanel);
+        dialog.pack();
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true);
+    }
+
+    private void paintTutorialGraphic(Graphics2D g, int page, int w, int h) {
+        enableQuality(g);
+        g.setColor(GRID_WATER_BG);
+        g.fillRect(0, 0, w, h);
+        switch (page) {
+            case 0: paintTutorialObjective(g, w, h); break;
+            case 1: paintTutorialControls(g, w, h); break;
+            case 2: paintTutorialShipMove(g, w, h); break;
+            case 3: paintTutorialMissile(g, w, h); break;
+            case 4: paintTutorialVictory(g, w, h); break;
+            default: break;
+        }
+    }
+
+    private void paintTutorialObjective(Graphics2D g, int w, int h) {
+        int cs = 22;
+        int gridRows = 5;
+        int gridCols = 9;
+        int dockW = 30;
+        int harborW = 30;
+        int totalW = dockW + gridCols * cs + harborW;
+        int startX = (w - totalW) / 2;
+        int startY = (h - gridRows * cs) / 2;
+        int gridX = startX + dockW;
+
+        for (int r = 0; r < gridRows; r++) {
+            for (int c = 0; c < gridCols; c++) {
+                int x = gridX + c * cs;
+                int y = startY + r * cs;
+                g.setColor(r == 2 ? REVEALED_CELL_BG : HIDDEN_CELL_BG);
+                g.fillRect(x + 1, y + 1, cs - 2, cs - 2);
+                g.setColor(GRID_WATER_BG);
+                g.drawRect(x, y, cs, cs);
+            }
+        }
+
+        // West dock
+        g.setColor(DOCK_BG);
+        g.fillRect(startX, startY, dockW, gridRows * cs);
+        g.setColor(new Color(114, 83, 52));
+        g.fillRect(startX + 4, startY + 2 * cs + cs / 2 - 2, dockW - 4, 4);
+        g.setColor(new Color(193, 58, 45));
+        g.fillRect(startX + dockW / 2 - 1, startY + 6, 2, 10);
+        g.fillOval(startX + dockW / 2 - 4, startY + 4, 8, 6);
+
+        // East harbor
+        g.setColor(HARBOR_BG);
+        g.fillRect(gridX + gridCols * cs, startY, harborW, gridRows * cs);
+        g.setColor(new Color(89, 120, 74));
+        g.fillRoundRect(gridX + gridCols * cs + 3, startY + 3, harborW - 6, gridRows * cs - 6, 5, 5);
+        g.setColor(new Color(227, 207, 92));
+        g.fillOval(gridX + gridCols * cs + harborW - 13, startY + 4, 8, 8);
+
+        // Labels
+        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 8));
+        g.setColor(new Color(80, 50, 20));
+        g.drawString("WEST", startX + 3, startY + gridRows * cs - 5);
+        g.setColor(new Color(40, 80, 30));
+        g.drawString("EAST", gridX + gridCols * cs + 3, startY + gridRows * cs - 5);
+
+        // Ship in mid-channel
+        int shipX = gridX + 4 * cs;
+        int shipY = startY + 2 * cs;
+        Graphics2D gc = (Graphics2D) g.create();
+        gc.translate(shipX, shipY);
+        paintBoat(gc, cs * 2, cs);
+        gc.dispose();
+
+        // Arrow pointing east
+        g.setColor(new Color(255, 255, 255, 200));
+        g.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        int arrowY = startY + 2 * cs + cs / 2;
+        int arrowSX = gridX + 6 * cs + 4;
+        int arrowEX = gridX + gridCols * cs - 4;
+        g.drawLine(arrowSX, arrowY, arrowEX, arrowY);
+        g.fillPolygon(new int[]{arrowEX, arrowEX - 7, arrowEX - 7},
+                      new int[]{arrowY, arrowY - 4, arrowY + 4}, 3);
+    }
+
+    private void paintTutorialControls(Graphics2D g, int w, int h) {
+        int cs = 26;
+        int gridCols = 5;
+        int gridRows = 4;
+        int startX = (w - gridCols * cs) / 2;
+        int startY = (h - gridRows * cs) / 2 + 4;
+
+        // 0=hidden, 1=revealed+number, 2=revealed blank, 3=flagged
+        int[][] cellType = {
+            {0, 0, 0, 3, 0},
+            {2, 1, 0, 0, 0},
+            {2, 2, 0, 3, 0},
+            {2, 1, 0, 0, 0}
+        };
+        int[][] cellNumber = {
+            {0, 0, 0, 0, 0},
+            {0, 1, 0, 0, 0},
+            {0, 2, 0, 0, 0},
+            {0, 1, 0, 0, 0}
+        };
+
+        for (int r = 0; r < gridRows; r++) {
+            for (int c = 0; c < gridCols; c++) {
+                int x = startX + c * cs;
+                int y = startY + r * cs;
+                int type = cellType[r][c];
+                g.setColor((type == 1 || type == 2) ? REVEALED_CELL_BG : HIDDEN_CELL_BG);
+                g.fillRect(x + 1, y + 1, cs - 2, cs - 2);
+                g.setColor(GRID_WATER_BG);
+                g.drawRect(x, y, cs, cs);
+
+                if (type == 1) {
+                    int n = cellNumber[r][c];
+                    Color nc = (n > 0 && n < NUMBER_COLORS.length) ? NUMBER_COLORS[n] : Color.BLACK;
+                    g.setColor(nc != null ? nc : Color.BLACK);
+                    g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 14));
+                    g.drawString(String.valueOf(n), x + cs / 2 - 4, y + cs / 2 + 5);
+                } else if (type == 3) {
+                    g.setColor(new Color(193, 58, 45));
+                    g.fillRect(x + cs / 2 - 1, y + 5, 2, cs - 11);
+                    Path2D flag = new Path2D.Double();
+                    flag.moveTo(x + cs / 2 + 1, y + 6);
+                    flag.lineTo(x + cs / 2 + 10, y + 10);
+                    flag.lineTo(x + cs / 2 + 1, y + 14);
+                    flag.closePath();
+                    g.fill(flag);
+                }
+            }
+        }
+
+        g.setStroke(new BasicStroke(1.5f));
+        // Left-click annotation — top-left hidden cell (col 0, row 0)
+        int lx = startX + cs / 2;
+        int ly = startY;
+        g.setColor(new Color(40, 120, 200));
+        g.drawLine(lx, ly - 2, lx, ly - 14);
+        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 9));
+        g.drawString("L-click = reveal", lx - 30, ly - 16);
+
+        // Right-click annotation — flagged cell (col 3, row 0)
+        int rx = startX + 3 * cs + cs / 2;
+        int ry = startY;
+        g.setColor(new Color(200, 60, 30));
+        g.drawLine(rx, ry - 2, rx, ry - 14);
+        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 9));
+        g.drawString("R-click = flag", rx - 28, ry - 16);
+    }
+
+    private void paintTutorialShipMove(Graphics2D g, int w, int h) {
+        int cs = 22;
+        int gridRows = 4;
+        int gridCols = 7;
+        int dockW = 22;
+        int keyClusterW = 72;   // width reserved for arrow-key diagram
+        int gap = 10;
+        int totalW = dockW + gridCols * cs + gap + keyClusterW;
+        int startX = (w - totalW) / 2;
+        int startY = (h - gridRows * cs) / 2;
+        int gridX = startX + dockW;
+
+        // West dock
+        g.setColor(DOCK_BG);
+        g.fillRect(startX, startY, dockW, gridRows * cs);
+
+        for (int r = 0; r < gridRows; r++) {
+            for (int c = 0; c < gridCols; c++) {
+                int x = gridX + c * cs;
+                int y = startY + r * cs;
+                boolean channel = (r == 2);
+                g.setColor(channel ? REVEALED_CELL_BG : HIDDEN_CELL_BG);
+                g.fillRect(x + 1, y + 1, cs - 2, cs - 2);
+                g.setColor(GRID_WATER_BG);
+                g.drawRect(x, y, cs, cs);
+                // Highlight launch cell
+                if (channel && c == 0) {
+                    g.setColor(new Color(80, 180, 240, 90));
+                    g.fillRect(x + 1, y + 1, cs - 2, cs - 2);
+                    g.setColor(new Color(60, 160, 220));
+                    g.setStroke(new BasicStroke(2f));
+                    g.drawRect(x + 2, y + 2, cs - 4, cs - 4);
+                }
+            }
+        }
+
+        // Ship at column 1
+        int shipX = gridX + 1 * cs;
+        int shipY = startY + 2 * cs;
+        Graphics2D gc = (Graphics2D) g.create();
+        gc.translate(shipX, shipY);
+        paintBoat(gc, cs * 2, cs);
+        gc.dispose();
+
+        // Movement arrows on grid
+        g.setColor(new Color(255, 255, 255, 200));
+        g.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        for (int step = 4; step <= 5; step++) {
+            int ax = gridX + step * cs + cs / 2;
+            int ay = startY + 2 * cs + cs / 2;
+            g.drawLine(ax - 7, ay, ax + 1, ay);
+            g.fillPolygon(new int[]{ax + 1, ax - 4, ax - 4},
+                          new int[]{ay, ay - 3, ay + 3}, 3);
+        }
+
+        // "Launch here" label
+        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 9));
+        g.setColor(new Color(60, 160, 220));
+        g.drawString("Launch", gridX, startY + 2 * cs - 4);
+
+        // ── Arrow-key cluster ─────────────────────────────────────────────
+        // Layout (standard inverted-T):
+        //       [  ↑  ]
+        //  [  ← ][ ↓ ][ →]
+        int ks = 20;  // key size
+        int kx = gridX + gridCols * cs + gap;
+        int ky = (h - 2 * ks - 2) / 2;  // vertically centered
+
+        // helper: draw one key at (kx+dx, ky+dy) with a label glyph
+        // keys: up=(ks,0), left=(0,ks+2), down=(ks,ks+2), right=(2*ks+4,ks+2)
+        int[][] keyOffsets = { {ks + 2, 0}, {0, ks + 2}, {ks + 2, ks + 2}, {(ks + 2) * 2, ks + 2} };
+        String[] keyGlyphs = { "\u2191", "\u2190", "\u2193", "\u2192" };
+
+        for (int i = 0; i < 4; i++) {
+            int kbx = kx + keyOffsets[i][0];
+            int kby = ky + keyOffsets[i][1];
+            // Key body with bevel effect
+            g.setColor(new Color(55, 70, 85));
+            g.fillRoundRect(kbx, kby + 3, ks, ks, 5, 5);  // shadow
+            g.setColor(new Color(220, 230, 240));
+            g.fillRoundRect(kbx, kby, ks, ks, 5, 5);
+            g.setColor(new Color(170, 185, 200));
+            g.setStroke(new BasicStroke(1f));
+            g.drawRoundRect(kbx, kby, ks, ks, 5, 5);
+            // Arrow glyph
+            g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 11));
+            g.setColor(new Color(40, 60, 90));
+            FontMetrics fm = g.getFontMetrics();
+            int gx = kbx + (ks - fm.stringWidth(keyGlyphs[i])) / 2;
+            int gy = kby + (ks + fm.getAscent() - fm.getDescent()) / 2 - 1;
+            g.drawString(keyGlyphs[i], gx, gy);
+        }
+
+        // "or arrow keys" label below cluster
+        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 9));
+        g.setColor(new Color(200, 220, 235));
+        int labelX = kx;
+        int labelY = ky + 2 * ks + 4 + 11;
+        g.drawString("or arrow keys", labelX, labelY);
+    }
+
+    private void paintTutorialMissile(Graphics2D g, int w, int h) {
+        int cs = 24;
+        int gridRows = 5;
+        int gridCols = 7;
+        int startX = (w - gridCols * cs - 44) / 2 + 22;
+        int startY = (h - gridRows * cs) / 2;
+
+        for (int r = 0; r < gridRows; r++) {
+            for (int c = 0; c < gridCols; c++) {
+                int x = startX + c * cs;
+                int y = startY + r * cs;
+                boolean revealed = (r == 2 && c < 3);
+                g.setColor(revealed ? REVEALED_CELL_BG : HIDDEN_CELL_BG);
+                g.fillRect(x + 1, y + 1, cs - 2, cs - 2);
+                g.setColor(GRID_WATER_BG);
+                g.drawRect(x, y, cs, cs);
+            }
+        }
+
+        // Target cell highlight
+        int targetCol = 5;
+        int targetRow = 2;
+        int tx = startX + targetCol * cs;
+        int ty = startY + targetRow * cs;
+        g.setColor(new Color(255, 160, 50, 130));
+        g.fillRect(tx + 1, ty + 1, cs - 2, cs - 2);
+        g.setColor(new Color(220, 80, 20));
+        g.setStroke(new BasicStroke(2f));
+        g.drawRect(tx + 1, ty + 1, cs - 3, cs - 3);
+
+        // Ship at col 1, row 2
+        int shipX = startX + 1 * cs;
+        int shipY = startY + 2 * cs;
+        Graphics2D gc = (Graphics2D) g.create();
+        gc.translate(shipX, shipY);
+        paintBoat(gc, cs * 2, cs);
+        gc.dispose();
+
+        // Missile arc
+        float sx = shipX + cs * 2 - 2;
+        float sy = shipY + cs / 2f;
+        float ex = tx + cs / 2f;
+        float ey = ty + cs / 2f;
+        float mx = (sx + ex) / 2f;
+        float my = Math.min(sy, ey) - 26f;
+        g.setColor(new Color(255, 180, 30));
+        g.setStroke(new BasicStroke(2.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g.draw(new QuadCurve2D.Float(sx, sy, mx, my, ex, ey));
+
+        // Explosion at target
+        int bx = tx + cs / 2 - 10;
+        int by = ty + cs / 2 - 10;
+        g.setColor(new Color(229, 86, 47, 210));
+        g.fillOval(bx, by, 20, 20);
+        g.setColor(new Color(255, 214, 95, 230));
+        g.fillOval(bx + 5, by + 5, 10, 10);
+
+        // Missile button on the left
+        int btnX = startX - 38;
+        int btnY = startY + gridRows * cs / 2 - 13;
+        g.setColor(new Color(90, 25, 15));
+        g.fillRoundRect(btnX, btnY, 32, 26, 6, 6);
+        g.setColor(new Color(255, 140, 30));
+        g.setStroke(new BasicStroke(2f));
+        g.drawRoundRect(btnX, btnY, 32, 26, 6, 6);
+        // Blast star inside button
+        int[] bpx = {btnX + 16, btnX + 19, btnX + 29, btnX + 21, btnX + 25, btnX + 18,
+                     btnX + 16, btnX + 14, btnX + 7, btnX + 11, btnX + 3, btnX + 13};
+        int[] bpy = {btnY + 2, btnY + 8, btnY + 9, btnY + 13, btnY + 22, btnY + 21,
+                     btnY + 24, btnY + 21, btnY + 22, btnY + 13, btnY + 9, btnY + 8};
+        g.setColor(new Color(255, 200, 60));
+        g.fillPolygon(bpx, bpy, bpx.length);
+        // Armed label
+        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 9));
+        g.setColor(new Color(255, 140, 30));
+        g.drawString("ARMED", btnX, btnY + 38);
+    }
+
+    private void paintTutorialVictory(Graphics2D g, int w, int h) {
+        int cs = 22;
+        int gridRows = 4;
+        int gridCols = 5;
+        int dockW = 26;
+        int harborW = 26;
+        int half = w / 2;
+
+        // ---- Left half: Leg 1 — approaching east harbor ----
+        int l1GridX = 8 + dockW;
+        int l1StartY = (h - gridRows * cs) / 2;
+
+        // Harbor
+        g.setColor(HARBOR_BG);
+        g.fillRect(l1GridX + gridCols * cs, l1StartY, harborW, gridRows * cs);
+        g.setColor(new Color(89, 120, 74));
+        g.fillRoundRect(l1GridX + gridCols * cs + 2, l1StartY + 2, harborW - 4, gridRows * cs - 4, 4, 4);
+        g.setColor(new Color(227, 207, 92));
+        g.fillOval(l1GridX + gridCols * cs + harborW - 12, l1StartY + 4, 8, 8);
+
+        for (int r = 0; r < gridRows; r++) {
+            for (int c = 0; c < gridCols; c++) {
+                int x = l1GridX + c * cs;
+                int y = l1StartY + r * cs;
+                g.setColor(r == 2 ? REVEALED_CELL_BG : HIDDEN_CELL_BG);
+                g.fillRect(x + 1, y + 1, cs - 2, cs - 2);
+                g.setColor(GRID_WATER_BG);
+                g.drawRect(x, y, cs, cs);
+            }
+        }
+
+        // Ship approaching harbor
+        int s1X = l1GridX + 3 * cs;
+        int s1Y = l1StartY + 2 * cs;
+        Graphics2D gc1 = (Graphics2D) g.create();
+        gc1.translate(s1X, s1Y);
+        paintBoat(gc1, cs * 2, cs);
+        gc1.dispose();
+
+        // Arrow into harbor
+        g.setColor(new Color(255, 255, 255, 200));
+        g.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        int a1y = l1StartY + 2 * cs + cs / 2;
+        int a1sx = l1GridX + 5 * cs + 2;
+        int a1ex = l1GridX + 5 * cs + harborW - 6;
+        g.drawLine(a1sx, a1y, a1ex, a1y);
+        g.fillPolygon(new int[]{a1ex, a1ex - 6, a1ex - 6},
+                      new int[]{a1y, a1y - 4, a1y + 4}, 3);
+
+        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 10));
+        g.setColor(new Color(89, 120, 74));
+        g.drawString("LEG 1: East", 8, l1StartY - 4);
+
+        // Divider
+        g.setColor(new Color(255, 255, 255, 70));
+        float[] dash = {4f, 4f};
+        g.setStroke(new BasicStroke(1.5f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 1f, dash, 0f));
+        g.drawLine(half, 4, half, h - 4);
+
+        // ---- Right half: Leg 2 — returning to west dock ----
+        int l2StartX = half + 6;
+        int l2GridX = l2StartX + dockW;
+        int l2StartY = l1StartY;
+
+        // West dock
+        g.setColor(DOCK_BG);
+        g.fillRect(l2StartX, l2StartY, dockW, gridRows * cs);
+        g.setColor(new Color(114, 83, 52));
+        g.fillRect(l2StartX + 4, l2StartY + 2 * cs + cs / 2 - 2, dockW - 4, 4);
+        g.setColor(new Color(193, 58, 45));
+        g.fillRect(l2StartX + dockW / 2 - 1, l2StartY + 6, 2, 10);
+        g.fillOval(l2StartX + dockW / 2 - 4, l2StartY + 4, 8, 6);
+
+        for (int r = 0; r < gridRows; r++) {
+            for (int c = 0; c < gridCols; c++) {
+                int x = l2GridX + c * cs;
+                int y = l2StartY + r * cs;
+                g.setColor(r == 2 ? REVEALED_CELL_BG : HIDDEN_CELL_BG);
+                g.fillRect(x + 1, y + 1, cs - 2, cs - 2);
+                g.setColor(GRID_WATER_BG);
+                g.drawRect(x, y, cs, cs);
+            }
+        }
+
+        // Ship returning toward dock
+        int s2X = l2GridX + 2 * cs;
+        int s2Y = l2StartY + 2 * cs;
+        Graphics2D gc2 = (Graphics2D) g.create();
+        gc2.translate(s2X, s2Y);
+        paintBoat(gc2, cs * 2, cs);
+        gc2.dispose();
+
+        // Arrow into dock (pointing left)
+        g.setColor(new Color(255, 255, 255, 200));
+        g.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        int a2y = l2StartY + 2 * cs + cs / 2;
+        g.drawLine(l2StartX + dockW - 4, a2y, l2StartX + 6, a2y);
+        g.fillPolygon(new int[]{l2StartX + 6, l2StartX + 12, l2StartX + 12},
+                      new int[]{a2y, a2y - 4, a2y + 4}, 3);
+
+        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 10));
+        g.setColor(new Color(193, 58, 45));
+        g.drawString("LEG 2: Win!", l2StartX, l2StartY - 4);
+        g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 20));
+        g.setColor(new Color(193, 58, 45));
+        int winLabelX = l2StartX + (dockW + gridCols * cs) / 2 - 22;
+        int winLabelY = l2StartY + gridRows * cs + 20;
+        if (winLabelY > h - 2) { winLabelY = h - 2; }
+        g.drawString("WIN!", winLabelX, winLabelY);
     }
 
     // -------------------------------------------------------------------------
@@ -291,6 +881,9 @@ public class MineSweeperUI extends JFrame {
 
         if (swingTimer != null) {
             swingTimer.stop();
+        }
+        if (ambientAnimationTimer != null) {
+            ambientAnimationTimer.stop();
         }
         if (boatAnimationTimer != null) {
             boatAnimationTimer.stop();
@@ -314,6 +907,7 @@ public class MineSweeperUI extends JFrame {
         winDialogShown = false;
         harborSequence = null;
         westDockSequence = null;
+        animationEpochNanos = System.nanoTime();
 
         board = new Board(rows, cols, mines, this.mineLayerCount);
         lastGameState = board.getGameState();
@@ -438,6 +1032,8 @@ public class MineSweeperUI extends JFrame {
             }
         });
         initializeWestApproach();
+        ensureAmbientAnimationTimer();
+        ambientAnimationTimer.start();
         swingTimer.start();
         ensureMineLayerTimer();
         if (mineLayerCount > 0) {
@@ -487,6 +1083,35 @@ public class MineSweeperUI extends JFrame {
                 DOCK_BG),
             "Convoy Home",
             JOptionPane.PLAIN_MESSAGE));
+    }
+
+    private void ensureAmbientAnimationTimer() {
+        if (ambientAnimationTimer != null) {
+            return;
+        }
+        ambientAnimationTimer = new Timer(AMBIENT_ANIMATION_DELAY_MS, e -> {
+            if (buttons != null) {
+                for (JButton[] buttonRow : buttons) {
+                    if (buttonRow == null) {
+                        continue;
+                    }
+                    for (JButton button : buttonRow) {
+                        if (button != null) {
+                            button.repaint();
+                        }
+                    }
+                }
+            }
+            if (boatOverlay != null && boatOverlay.isVisible()) {
+                boatOverlay.repaint();
+            }
+            if (mineLayerOverlay != null && mineLayerOverlay.isVisible()) {
+                mineLayerOverlay.repaint();
+            }
+            if (missileOverlay != null && missileOverlay.isVisible()) {
+                missileOverlay.repaint();
+            }
+        });
     }
 
     private void renderCell(int row, int col) {
@@ -575,7 +1200,7 @@ public class MineSweeperUI extends JFrame {
     }
 
     private JButton createCellButton(int row, int col) {
-        JButton btn = new JButton();
+        JButton btn = new CellButton(row, col);
         btn.setPreferredSize(new Dimension(CELL_SIZE, CELL_SIZE));
         btn.setFocusPainted(false);
         btn.setMargin(new Insets(0, 0, 0, 0));
@@ -626,6 +1251,7 @@ public class MineSweeperUI extends JFrame {
                     || SwingUtilities.isRightMouseButton(e))) {
                     rememberUndoState();
                     board.chord(row, col);
+                    playSoundEffect(SoundEffect.CHORD);
                 } else if (SwingUtilities.isLeftMouseButton(e) && missileModeArmed) {
                     rememberUndoState();
                     startMissileStrike(row, col);
@@ -635,14 +1261,23 @@ public class MineSweeperUI extends JFrame {
                     && cell.getAdjacentMines() > 0) {
                     rememberUndoState();
                     board.chord(row, col);
+                    playSoundEffect(SoundEffect.CHORD);
                 } else if (SwingUtilities.isLeftMouseButton(e)) {
                     rememberUndoState();
+                    boolean wasDocked = board.isBoatDocked();
                     if (!board.moveBoatTo(row, col)) {
                         board.reveal(row, col);
+                        playSoundEffect(board.getGameState() == Board.GameState.LOST ? SoundEffect.MINE_HIT : SoundEffect.REVEAL);
+                    } else {
+                        if (wasDocked && boatOverlay != null) {
+                            boatOverlay.triggerLaunchWake();
+                        }
+                        playSoundEffect(SoundEffect.BOAT_MOVE);
                     }
                 } else if (SwingUtilities.isRightMouseButton(e)) {
                     rememberUndoState();
                     board.toggleFlag(row, col);
+                    playSoundEffect(SoundEffect.FLAG);
                 }
 
                 chordRow = -1;
@@ -762,6 +1397,7 @@ public class MineSweeperUI extends JFrame {
             @Override
             public void actionPerformed(ActionEvent e) {
                 setMissileModeArmed(!missileModeArmed);
+                playSoundEffect(missileModeArmed ? SoundEffect.ARM_ON : SoundEffect.ARM_OFF);
                 updateBoard();
             }
         });
@@ -784,7 +1420,10 @@ public class MineSweeperUI extends JFrame {
                 if (board != null) {
                     rememberUndoState();
                 }
-                if (board != null && board.moveBoatBy(rowDelta, colDelta)) {
+                if (board != null && board.moveBoatByBrave(rowDelta, colDelta)) {
+                    if (board.getGameState() != Board.GameState.LOST) {
+                        playSoundEffect(SoundEffect.BOAT_MOVE);
+                    }
                     updateBoard();
                 }
             }
@@ -973,6 +1612,7 @@ public class MineSweeperUI extends JFrame {
                 if (boatOverlay != null) {
                     boatOverlay.repaint();
                 }
+                playSoundEffect(SoundEffect.HARBOR_COMPLETE);
                 SwingUtilities.invokeLater(this::showHarborArrivalDialog);
             }
         });
@@ -1006,6 +1646,7 @@ public class MineSweeperUI extends JFrame {
                 if (boatOverlay != null) {
                     boatOverlay.repaint();
                 }
+                playSoundEffect(SoundEffect.HOMECOMING);
                 onGameWon();
             }
         });
@@ -1026,6 +1667,7 @@ public class MineSweeperUI extends JFrame {
                 missileAnimation.flightProgress = Math.min(1f, missileAnimation.flightProgress + MISSILE_FLIGHT_STEP);
                 if (missileAnimation.flightProgress >= 1f) {
                     missileAnimation.impactApplied = true;
+                    playSoundEffect(SoundEffect.MISSILE_IMPACT);
                     if (board.fireMissileAt(missileAnimation.targetRow, missileAnimation.targetCol)) {
                         updateBoard();
                     }
@@ -1083,6 +1725,7 @@ public class MineSweeperUI extends JFrame {
     private void startHarborSequence() {
         harborSequence = new HarborSequence();
         setMissileModeArmed(false);
+        playSoundEffect(SoundEffect.HARBOR_APPROACH);
         ensureHarborSequenceTimer();
         harborSequenceTimer.start();
         if (boatOverlay != null) {
@@ -1093,6 +1736,7 @@ public class MineSweeperUI extends JFrame {
     private void startWestDockSequence() {
         westDockSequence = new WestDockSequence();
         setMissileModeArmed(false);
+        playSoundEffect(SoundEffect.DOCK_APPROACH);
         ensureWestDockSequenceTimer();
         westDockSequenceTimer.start();
         if (boatOverlay != null) {
@@ -1148,9 +1792,53 @@ public class MineSweeperUI extends JFrame {
 
         missileAnimation = new MissileAnimation(start.x, start.y, target.x, target.y, targetRow, targetCol);
         setMissileModeArmed(false);
+        playSoundEffect(SoundEffect.MISSILE_LAUNCH);
         ensureMissileAnimationTimer();
         missileAnimationTimer.start();
         updateMissileOverlay();
+    }
+
+    private void playSoundEffect(SoundEffect effect) {
+        if (effect == null || !soundEnabled) {
+            return;
+        }
+        Thread thread = new Thread(() -> {
+            try {
+                playToneSequence(effect.tones);
+            } catch (Exception ignored) {
+                Toolkit.getDefaultToolkit().beep();
+            }
+        }, "hormuz-sfx");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void playToneSequence(Tone[] tones) throws Exception {
+        AudioFormat format = new AudioFormat(22050f, 8, 1, true, false);
+        try (SourceDataLine line = AudioSystem.getSourceDataLine(format)) {
+            line.open(format, 22050);
+            line.start();
+            for (Tone tone : tones) {
+                byte[] buffer = synthesizeTone(tone.frequencyHz, tone.durationMs, tone.volume, tone.descending);
+                line.write(buffer, 0, buffer.length);
+            }
+            line.drain();
+        }
+    }
+
+    private byte[] synthesizeTone(float frequencyHz, int durationMs, float volume, boolean descending) {
+        int sampleRate = 22050;
+        int sampleCount = Math.max(1, sampleRate * durationMs / 1000);
+        byte[] buffer = new byte[sampleCount];
+        for (int i = 0; i < sampleCount; i++) {
+            float progress = sampleCount == 1 ? 1f : i / (float) (sampleCount - 1);
+            float envelope = (float) Math.sin(Math.PI * progress);
+            float frequency = descending ? frequencyHz * (1.15f - 0.25f * progress) : frequencyHz * (0.92f + 0.12f * progress);
+            double angle = 2.0 * Math.PI * frequency * i / sampleRate;
+            double wave = Math.sin(angle) + 0.25 * Math.sin(angle * 2.0);
+            buffer[i] = (byte) Math.round(127f * volume * envelope * wave);
+        }
+        return buffer;
     }
 
     private Point2D getMissileLaunchPosition(int targetRow) {
@@ -1386,83 +2074,121 @@ public class MineSweeperUI extends JFrame {
     }
 
     private void paintBoat(Graphics2D g, int width, int height) {
-        int waterline = Math.max(14, height - 20);
-        g.setColor(new Color(78, 141, 181, 120));
-        g.fillRoundRect(3, waterline + 6, width - 6, Math.max(7, height - waterline - 8), 12, 12);
+        int hullTop = 7;
+        int hullBottom = height - 8;
+        int hullMidY = (hullTop + hullBottom) / 2;
 
-        Path2D hull = new Path2D.Double();
-        hull.moveTo(6, waterline + 2);
-        hull.lineTo(width - 16, waterline + 2);
-        hull.lineTo(width - 8, waterline + 8);
-        hull.lineTo(width - 4, height - 9);
-        hull.lineTo(14, height - 9);
-        hull.lineTo(6, waterline + 2);
-        g.setColor(new Color(34, 49, 62));
+        g.setColor(new Color(73, 147, 186, 92));
+        g.fill(new Ellipse2D.Float(4f, hullBottom - 1f, width - 8f, 7f));
+
+        Path2D hull = new Path2D.Float();
+        hull.moveTo(5, hullMidY);
+        hull.lineTo(10, hullTop + 1);
+        hull.lineTo(width - 11, hullTop + 1);
+        hull.quadTo(width - 5, hullTop + 2, width - 4, hullMidY);
+        hull.quadTo(width - 5, hullBottom - 2, width - 11, hullBottom - 1);
+        hull.lineTo(10, hullBottom - 1);
+        hull.closePath();
+        g.setColor(new Color(38, 50, 60));
         g.fill(hull);
 
-        g.setColor(new Color(116, 132, 143));
-        g.fillRoundRect(10, waterline + 1, width - 22, 4, 3, 3);
+        g.setColor(new Color(111, 123, 131));
+        g.fill(new RoundRectangle2D.Float(8f, hullTop + 2f, width - 16f, hullBottom - hullTop - 4f, 8f, 8f));
 
-        g.setColor(new Color(199, 180, 136));
-        g.fillRoundRect(12, waterline - 6, width - 30, 7, 4, 4);
-        g.setColor(new Color(89, 82, 70));
-        g.fillRect(16, waterline - 3, width - 38, 1);
-        g.fillRect(16, waterline - 1, width - 38, 1);
+        g.setColor(new Color(205, 188, 147));
+        g.fill(new RoundRectangle2D.Float(10f, hullTop + 4f, width - 26f, hullBottom - hullTop - 8f, 6f, 6f));
 
-        g.setColor(new Color(228, 234, 239));
-        g.fillRoundRect(width - 24, waterline - 21, 15, 13, 5, 5);
-        g.fillRoundRect(width - 20, waterline - 29, 9, 9, 4, 4);
-        g.fillRoundRect(width - 28, waterline - 15, 8, 7, 3, 3);
+        g.setColor(new Color(123, 111, 90));
+        g.fillRect(13, hullMidY - 1, width - 34, 2);
+        g.fillRect(13, hullMidY - 6, width - 34, 1);
+        g.fillRect(13, hullMidY + 5, width - 34, 1);
 
-        List<Shape> windows = new ArrayList<>();
-        windows.add(new RoundRectangle2D.Double(width - 21, waterline - 17, 4, 3, 2, 2));
-        windows.add(new RoundRectangle2D.Double(width - 15, waterline - 17, 4, 3, 2, 2));
-        windows.add(new RoundRectangle2D.Double(width - 18, waterline - 25, 4, 3, 2, 2));
-        g.setColor(new Color(127, 187, 216));
-        for (Shape window : windows) {
-            g.fill(window);
+        g.setColor(new Color(89, 95, 101));
+        for (int x = 15; x < width - 20; x += 7) {
+            g.fillRect(x, hullMidY - 7, 2, 14);
         }
 
-        g.setColor(new Color(78, 87, 92));
-        g.fillRect(width - 17, waterline - 36, 3, 8);
-        g.fillRect(width - 11, waterline - 34, 3, 6);
+        g.setColor(new Color(156, 140, 105));
+        g.fill(new RoundRectangle2D.Float(16f, hullTop + 6f, width - 40f, 4f, 3f, 3f));
+        g.fill(new RoundRectangle2D.Float(16f, hullBottom - 10f, width - 40f, 4f, 3f, 3f));
 
-        g.setColor(new Color(165, 213, 235));
-        g.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-        g.drawArc(8, height - 13, 24, 10, 0, 180);
-        g.drawArc(width - 34, height - 13, 24, 10, 0, 180);
+        g.setColor(new Color(231, 236, 240));
+        g.fill(new RoundRectangle2D.Float(width - 22f, hullTop + 3f, 12f, 12f, 4f, 4f));
+        g.fill(new RoundRectangle2D.Float(width - 19f, hullTop - 2f, 8f, 7f, 3f, 3f));
+        g.fill(new RoundRectangle2D.Float(width - 27f, hullTop + 10f, 7f, 7f, 3f, 3f));
+
+        g.setColor(new Color(134, 193, 219));
+        g.fill(new RoundRectangle2D.Float(width - 20f, hullTop + 6f, 3f, 2f, 1f, 1f));
+        g.fill(new RoundRectangle2D.Float(width - 15f, hullTop + 6f, 3f, 2f, 1f, 1f));
+        g.fill(new RoundRectangle2D.Float(width - 17f, hullTop + 1f, 4f, 2f, 1f, 1f));
+
+        g.setColor(new Color(73, 81, 87));
+        g.fillRect(width - 16, hullTop - 8, 2, 6);
+        g.fillRect(width - 12, hullTop - 6, 2, 4);
+
+        g.setColor(new Color(164, 213, 235));
+        g.setStroke(new BasicStroke(2.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g.drawArc(8, hullBottom - 1, 20, 8, 0, 180);
+        g.drawArc(width - 30, hullBottom - 1, 20, 8, 0, 180);
     }
 
     private void paintMineLayer(Graphics2D g) {
         int width = CELL_SIZE;
         int height = CELL_SIZE;
-        int waterline = height - 11;
+        int hullTop = 8;
+        int hullBottom = height - 7;
+        int hullMidY = (hullTop + hullBottom) / 2;
+        float phase = (System.nanoTime() - animationEpochNanos) / 1_000_000_000f * (float) Math.PI * 2f;
+        float wakeShift = (float) Math.sin(phase) * 1.6f;
 
         g.setColor(MINELAYER_WAKE);
-        g.fillArc(2, height - 10, 10, 8, 0, 180);
-        g.fillArc(width - 12, height - 10, 10, 8, 0, 180);
+        g.fillArc(1, height - 10 + Math.round(wakeShift), 12, 8, 0, 180);
+        g.fillArc(width - 13, height - 10 - Math.round(wakeShift), 12, 8, 0, 180);
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.28f));
+        g.setColor(new Color(199, 241, 255));
+        g.fill(new Ellipse2D.Float(-4f, height - 8f, 16f, 6f));
+        g.fill(new Ellipse2D.Float(width - 12f, height - 8f, 16f, 6f));
+        g.fill(new Ellipse2D.Float(width / 2f - 10f, height - 6f + wakeShift, 20f, 5f));
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1f));
 
-        Path2D hull = new Path2D.Double();
-        hull.moveTo(6, waterline - 1);
-        hull.lineTo(width - 7, waterline - 1);
-        hull.lineTo(width - 11, height - 6);
-        hull.lineTo(10, height - 6);
+        Path2D hull = new Path2D.Float();
+        hull.moveTo(5, hullMidY);
+        hull.lineTo(10, hullTop + 1);
+        hull.lineTo(width - 9, hullTop + 2);
+        hull.quadTo(width - 4, hullMidY, width - 9, hullBottom - 2);
+        hull.lineTo(10, hullBottom - 1);
         hull.closePath();
         g.setColor(MINELAYER_HULL);
         g.fill(hull);
 
-        g.setColor(MINELAYER_DECK);
-        g.fillRoundRect(width / 2 - 7, waterline - 12, 12, 7, 4, 4);
-        g.fillRoundRect(width / 2 - 3, waterline - 17, 6, 6, 3, 3);
+        g.setColor(new Color(111, 120, 124));
+        g.fill(new RoundRectangle2D.Float(8f, hullTop + 2f, width - 16f, hullBottom - hullTop - 4f, 5f, 5f));
 
-        g.setColor(new Color(52, 63, 74));
-        g.fillRect(width / 2 + 1, waterline - 18, 2, 11);
-        Path2D flag = new Path2D.Double();
-        flag.moveTo(width / 2 + 3, waterline - 17);
-        flag.lineTo(width / 2 + 9, waterline - 14);
-        flag.lineTo(width / 2 + 3, waterline - 11);
-        flag.closePath();
-        g.fill(flag);
+        g.setColor(MINELAYER_DECK);
+        g.fill(new RoundRectangle2D.Float(10f, hullTop + 4f, width - 19f, hullBottom - hullTop - 8f, 4f, 4f));
+
+        g.setColor(new Color(214, 216, 218));
+        g.fill(new RoundRectangle2D.Float(width - 14f, hullTop + 4f, 6f, 7f, 2f, 2f));
+        g.fill(new RoundRectangle2D.Float(width - 12f, hullTop + 1f, 4f, 4f, 2f, 2f));
+
+        g.setColor(new Color(137, 191, 218));
+        g.fill(new RoundRectangle2D.Float(width - 13f, hullTop + 6f, 4f, 2f, 1f, 1f));
+
+        g.setColor(new Color(72, 80, 86));
+        g.fillRect(width - 10, hullTop - 4, 1, 6);
+
+        g.setColor(new Color(70, 72, 74));
+        g.fillRect(9, hullMidY - 5, width - 20, 2);
+        g.fillRect(9, hullMidY + 3, width - 20, 2);
+
+        g.setColor(new Color(48, 53, 57));
+        for (int x = 9; x < width - 13; x += 6) {
+            g.fill(new Ellipse2D.Float(x, hullMidY - 5.5f, 3.5f, 3.5f));
+            g.fill(new Ellipse2D.Float(x, hullMidY + 2.5f, 3.5f, 3.5f));
+        }
+
+        g.setColor(new Color(166, 68, 50));
+        g.fill(new RoundRectangle2D.Float(6f, hullMidY - 3f, 4f, 7f, 2f, 2f));
     }
 
     private static final class Point2D {
@@ -1472,6 +2198,82 @@ public class MineSweeperUI extends JFrame {
         private Point2D(float x, float y) {
             this.x = x;
             this.y = y;
+        }
+    }
+
+    private final class CellButton extends JButton {
+        private final int row;
+        private final int col;
+
+        private CellButton(int row, int col) {
+            this.row = row;
+            this.col = col;
+            setContentAreaFilled(false);
+            setOpaque(false);
+        }
+
+        @Override
+        protected void paintComponent(Graphics graphics) {
+            Graphics2D g = (Graphics2D) graphics.create();
+            try {
+                enableQuality(g);
+                g.setColor(getBackground());
+                g.fillRect(0, 0, getWidth(), getHeight());
+                paintCellWater(g, getWidth(), getHeight());
+            } finally {
+                g.dispose();
+            }
+            super.paintComponent(graphics);
+        }
+
+        private void paintCellWater(Graphics2D g, int width, int height) {
+            if (board == null) {
+                return;
+            }
+
+            Cell cell = board.getCell(row, col);
+            if (cell == null || board.isBoatOccupying(row, col)) {
+                return;
+            }
+            if (cell.isMine() && cell.isRevealed()) {
+                return;
+            }
+
+            float phase = (System.nanoTime() - animationEpochNanos) / 1_000_000_000f * (float) Math.PI * 2f;
+            float offset = row * 0.55f + col * 0.35f;
+            float waveOne = (float) Math.sin(phase * 1.35f + offset);
+            float waveTwo = (float) Math.cos(phase * 0.9f + offset * 1.4f);
+
+            Color crest = cell.isRevealed() ? new Color(243, 251, 255, 76) : new Color(220, 245, 255, 58);
+            Color trough = cell.isRevealed() ? new Color(88, 149, 182, 44) : new Color(47, 101, 137, 52);
+
+            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.85f));
+            g.setColor(crest);
+            g.setStroke(new BasicStroke(1.4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g.draw(new QuadCurve2D.Float(
+                2f,
+                height * 0.34f + waveOne * 2.2f,
+                width * 0.5f,
+                height * 0.18f + waveTwo * 2.4f,
+                width - 2f,
+                height * 0.34f - waveOne * 1.8f));
+            g.draw(new QuadCurve2D.Float(
+                2f,
+                height * 0.66f + waveTwo * 2.1f,
+                width * 0.52f,
+                height * 0.5f + waveOne * 2.3f,
+                width - 2f,
+                height * 0.66f - waveTwo * 1.7f));
+
+            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.45f));
+            g.setColor(trough);
+            g.draw(new QuadCurve2D.Float(
+                4f,
+                height * 0.5f - waveOne * 1.6f,
+                width * 0.45f,
+                height * 0.64f - waveTwo * 1.8f,
+                width - 4f,
+                height * 0.5f + waveOne * 1.2f));
         }
     }
 
@@ -1496,6 +2298,42 @@ public class MineSweeperUI extends JFrame {
         }
     }
 
+    private static final class Tone {
+        private final float frequencyHz;
+        private final int durationMs;
+        private final float volume;
+        private final boolean descending;
+
+        private Tone(float frequencyHz, int durationMs, float volume, boolean descending) {
+            this.frequencyHz = frequencyHz;
+            this.durationMs = durationMs;
+            this.volume = volume;
+            this.descending = descending;
+        }
+    }
+
+    private enum SoundEffect {
+        REVEAL(new Tone[]{new Tone(660f, 45, 0.22f, false)}),
+        FLAG(new Tone[]{new Tone(430f, 50, 0.2f, false), new Tone(515f, 35, 0.15f, false)}),
+        CHORD(new Tone[]{new Tone(560f, 40, 0.16f, false), new Tone(720f, 45, 0.16f, false)}),
+        BOAT_MOVE(new Tone[]{new Tone(180f, 95, 0.22f, true)}),
+        ARM_ON(new Tone[]{new Tone(720f, 35, 0.12f, false), new Tone(880f, 40, 0.12f, false)}),
+        ARM_OFF(new Tone[]{new Tone(840f, 35, 0.1f, true)}),
+        MISSILE_LAUNCH(new Tone[]{new Tone(360f, 55, 0.18f, false), new Tone(540f, 75, 0.2f, false)}),
+        MISSILE_IMPACT(new Tone[]{new Tone(170f, 70, 0.25f, true), new Tone(95f, 90, 0.22f, true)}),
+        HARBOR_APPROACH(new Tone[]{new Tone(220f, 110, 0.18f, false), new Tone(330f, 110, 0.16f, false)}),
+        HARBOR_COMPLETE(new Tone[]{new Tone(520f, 60, 0.15f, false), new Tone(660f, 90, 0.18f, false)}),
+        DOCK_APPROACH(new Tone[]{new Tone(200f, 120, 0.18f, true), new Tone(250f, 90, 0.14f, false)}),
+        HOMECOMING(new Tone[]{new Tone(392f, 75, 0.18f, false), new Tone(494f, 75, 0.18f, false), new Tone(588f, 120, 0.2f, false)}),
+        MINE_HIT(new Tone[]{new Tone(180f, 60, 0.24f, true), new Tone(120f, 120, 0.2f, true)});
+
+        private final Tone[] tones;
+
+        SoundEffect(Tone[] tones) {
+            this.tones = tones;
+        }
+    }
+
     private static final class HarborSequence {
         private float dockingProgress;
         private float mooringProgress;
@@ -1514,6 +2352,7 @@ public class MineSweeperUI extends JFrame {
         private float targetX;
         private float targetY;
         private boolean hasPosition;
+        private long launchWakeUntilNanos;
 
         private BoatOverlay() {
             setOpaque(false);
@@ -1535,6 +2374,11 @@ public class MineSweeperUI extends JFrame {
         private void setTarget(float x, float y) {
             targetX = x;
             targetY = y;
+        }
+
+        private void triggerLaunchWake() {
+            launchWakeUntilNanos = System.nanoTime() + 900_000_000L;
+            repaint();
         }
 
         private Point2D getCurrentVisualPosition() {
@@ -1574,12 +2418,15 @@ public class MineSweeperUI extends JFrame {
                 enableQuality(g);
                 float dockOffset = 0f;
                 float verticalBob = 0f;
+                float idlePhase = getAnimationPhase(0.9f);
                 if (harborSequence != null) {
                     dockOffset = easeOut(harborSequence.dockingProgress) * 11f;
                     verticalBob = (1f - harborSequence.dockingProgress) * 2.4f;
                 } else if (westDockSequence != null) {
                     dockOffset = -easeOut(westDockSequence.dockingProgress) * 11f;
                     verticalBob = (1f - westDockSequence.dockingProgress) * 1.8f;
+                } else {
+                    verticalBob = (float) Math.sin(idlePhase) * 1.2f;
                 }
                 g.translate(currentX + dockOffset, currentY + verticalBob);
                 paintArrivalWater(g);
@@ -1696,11 +2543,31 @@ public class MineSweeperUI extends JFrame {
         }
 
         private void paintArrivalWater(Graphics2D g) {
+            float wavePhase = getAnimationPhase(1.8f);
+            int leftWakeOffset = Math.round((float) Math.sin(wavePhase) * 2f);
+            int rightWakeOffset = Math.round((float) Math.cos(wavePhase * 0.9f) * 2f);
             g.setColor(new Color(255, 255, 255, 48));
             g.fill(new RoundRectangle2D.Double(1, 1, CELL_SIZE * 2 - 2, CELL_SIZE - 2, 16, 16));
             g.setColor(new Color(163, 218, 242, 95));
-            g.fillArc(2, CELL_SIZE - 10, 16, 8, 0, 180);
-            g.fillArc(CELL_SIZE + 6, CELL_SIZE - 10, 16, 8, 0, 180);
+            g.fillArc(2, CELL_SIZE - 10 + leftWakeOffset, 16, 8, 0, 180);
+            g.fillArc(CELL_SIZE + 6, CELL_SIZE - 10 + rightWakeOffset, 16, 8, 0, 180);
+            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.22f));
+            g.fill(new Ellipse2D.Float(6f, CELL_SIZE - 9f, CELL_SIZE * 2 - 12f, 6f + (float) Math.sin(wavePhase) * 1.5f));
+
+            float wakeProgress = clamp((launchWakeUntilNanos - System.nanoTime()) / 900_000_000f);
+            if (wakeProgress > 0f) {
+                float wakeWidth = 20f + (1f - wakeProgress) * 26f;
+                float wakeHeight = 7f + (1f - wakeProgress) * 7f;
+                g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.18f + wakeProgress * 0.34f));
+                g.setColor(new Color(218, 246, 255));
+                g.fill(new Ellipse2D.Float(-8f - (1f - wakeProgress) * 8f, CELL_SIZE - 10f, wakeWidth, wakeHeight));
+                g.fill(new Ellipse2D.Float(CELL_SIZE * 2 - 8f, CELL_SIZE - 10f, wakeWidth, wakeHeight));
+
+                g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.12f + wakeProgress * 0.2f));
+                g.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g.drawArc(-10, CELL_SIZE - 14, 28 + Math.round((1f - wakeProgress) * 16f), 12, 5, 150);
+                g.drawArc(CELL_SIZE * 2 - 18, CELL_SIZE - 14, 28 + Math.round((1f - wakeProgress) * 16f), 12, 25, 150);
+            }
         }
 
         private float clamp(float value) {
@@ -1711,6 +2578,10 @@ public class MineSweeperUI extends JFrame {
             float clamped = clamp(value);
             float inverse = 1f - clamped;
             return 1f - inverse * inverse;
+        }
+
+        private float getAnimationPhase(float speed) {
+            return (System.nanoTime() - animationEpochNanos) / 1_000_000_000f * speed * (float) Math.PI * 2f;
         }
     }
 
@@ -1736,10 +2607,34 @@ public class MineSweeperUI extends JFrame {
                     float currentY = missileAnimation.startY
                         + (missileAnimation.targetY - missileAnimation.startY) * missileAnimation.flightProgress;
 
+                    for (int i = 1; i <= 4; i++) {
+                        float trailProgress = Math.max(0f, missileAnimation.flightProgress - i * 0.06f);
+                        float trailX = missileAnimation.startX
+                            + (missileAnimation.targetX - missileAnimation.startX) * trailProgress;
+                        float trailY = missileAnimation.startY
+                            + (missileAnimation.targetY - missileAnimation.startY) * trailProgress;
+                        float size = 8f - i;
+                        float alpha = Math.max(0.08f, 0.32f - i * 0.05f);
+                        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+                        g.setColor(new Color(255, 228, 163));
+                        g.fill(new Ellipse2D.Float(trailX - size / 2f, trailY - size / 2f, size, size));
+                    }
+
                     g.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
                     g.setColor(new Color(255, 214, 95, 190));
                     g.drawLine(Math.round(missileAnimation.startX), Math.round(missileAnimation.startY), Math.round(currentX), Math.round(currentY));
 
+                    g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.55f));
+                    g.setColor(new Color(255, 241, 188));
+                    g.draw(new QuadCurve2D.Float(
+                        missileAnimation.startX,
+                        missileAnimation.startY,
+                        (missileAnimation.startX + currentX) / 2f,
+                        Math.min(missileAnimation.startY, currentY) - 12f,
+                        currentX,
+                        currentY));
+
+                    g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1f));
                     g.setColor(new Color(244, 103, 52));
                     g.fill(new Ellipse2D.Float(currentX - 5f, currentY - 5f, 10f, 10f));
                 } else {
@@ -1750,9 +2645,16 @@ public class MineSweeperUI extends JFrame {
                     g.setColor(new Color(255, 214, 95));
                     g.fill(new Ellipse2D.Float(missileAnimation.targetX - radius / 2f, missileAnimation.targetY - radius / 2f, radius, radius));
 
+                    g.setColor(new Color(255, 240, 182));
+                    g.fill(new Ellipse2D.Float(missileAnimation.targetX - radius * 0.28f, missileAnimation.targetY - radius * 0.28f, radius * 0.56f, radius * 0.56f));
+
                     g.setColor(new Color(229, 86, 47));
                     g.setStroke(new BasicStroke(4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
                     g.draw(new Ellipse2D.Float(missileAnimation.targetX - radius / 2f, missileAnimation.targetY - radius / 2f, radius, radius));
+
+                    g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0.08f, alpha * 0.9f)));
+                    g.setColor(new Color(255, 154, 62));
+                    g.draw(new Ellipse2D.Float(missileAnimation.targetX - radius * 0.72f, missileAnimation.targetY - radius * 0.72f, radius * 1.44f, radius * 1.44f));
                 }
             } finally {
                 g.dispose();
@@ -1772,10 +2674,12 @@ public class MineSweeperUI extends JFrame {
             Graphics2D g = (Graphics2D) graphics.create();
             try {
                 enableQuality(g);
+                float phase = (System.nanoTime() - animationEpochNanos) / 1_000_000_000f * (float) Math.PI * 2f;
                 for (Board.MineLayerPosition position : board.getMineLayerPositions()) {
                     Graphics2D layerGraphics = (Graphics2D) g.create();
                     try {
-                        layerGraphics.translate(position.getCol() * CELL_SIZE, position.getRow() * CELL_SIZE);
+                        float bob = (float) Math.sin(phase + position.getRow() * 0.7f + position.getCol() * 0.4f) * 1.4f;
+                        layerGraphics.translate(position.getCol() * CELL_SIZE, position.getRow() * CELL_SIZE + bob);
                         paintMineLayer(layerGraphics);
                     } finally {
                         layerGraphics.dispose();

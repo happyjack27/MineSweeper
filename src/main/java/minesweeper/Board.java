@@ -351,6 +351,62 @@ public class Board {
         return moveBoatTo(nextRow, nextCol);
     }
 
+    /**
+     * Arrow-key movement that dares unrevealed water.
+     * - Blocked by board edges and mine-layer cells (same as normal).
+     * - If the new footprint contains a mine, the ship is sunk (LOST).
+     * - If the new footprint is safe but unrevealed, those cells are revealed first.
+     * Returns true if the board state changed (ship moved or was sunk).
+     */
+    public boolean moveBoatByBrave(int rowDelta, int colDelta) {
+        if (boatDocked || gameState == GameState.WON || gameState == GameState.LOST) {
+            return false;
+        }
+        if (Math.abs(rowDelta) + Math.abs(colDelta) != 1) {
+            return false;
+        }
+
+        int nextRow = boatRow + rowDelta;
+        int nextCol = boatCol + colDelta;
+        if (nextRow < 0 || nextRow + BOAT_HEIGHT > rows || nextCol < 0 || nextCol + BOAT_WIDTH > cols) {
+            return false;
+        }
+
+        // Check for a mine in the target footprint — sink the ship if found
+        for (int r = nextRow; r < nextRow + BOAT_HEIGHT; r++) {
+            for (int c = nextCol; c < nextCol + BOAT_WIDTH; c++) {
+                if (cells[r][c].isMine()) {
+                    cells[r][c].setState(Cell.State.REVEALED);
+                    triggeredRow = r;
+                    triggeredCol = c;
+                    boatRow = nextRow;
+                    boatCol = nextCol;
+                    boatDocked = false;
+                    gameState = GameState.LOST;
+                    revealAllMines(r, c);
+                    return true;
+                }
+            }
+        }
+
+        // Safe — reveal any hidden cells the boat is sailing into
+        for (int r = nextRow; r < nextRow + BOAT_HEIGHT; r++) {
+            for (int c = nextCol; c < nextCol + BOAT_WIDTH; c++) {
+                if (!cells[r][c].isRevealed()) {
+                    floodReveal(r, c);
+                }
+            }
+        }
+
+        boatRow = nextRow;
+        boatCol = nextCol;
+        boatDocked = false;
+        enforceMineLayerDistanceFromBoat();
+        calculateAdjacent();
+        checkWin();
+        return true;
+    }
+
     private boolean isStraightRevealedPath(int startRow, int startCol, int endRow, int endCol) {
         int rowStep = Integer.compare(endRow, startRow);
         int colStep = Integer.compare(endCol, startCol);
@@ -633,14 +689,14 @@ public class Board {
                 continue;
             }
 
-            int[] retreat = findMineLayerRetreatCell(mineLayer);
-            if (retreat == null) {
-                continue;
+            int[] retreatCell = findMineLayerRetreatCell(mineLayer);
+            if (retreatCell == null) {
+                continue;  // hemmed in — stay put until space opens
             }
 
-            mineLayer.row = retreat[0];
-            mineLayer.col = retreat[1];
-            changed |= applyMineLayerEffect(retreat[0], retreat[1]);
+            mineLayer.row = retreatCell[0];
+            mineLayer.col = retreatCell[1];
+            changed |= applyMineLayerEffect(retreatCell[0], retreatCell[1]);
         }
 
         if (changed) {
@@ -650,17 +706,21 @@ public class Board {
 
     private int[] findMineLayerRetreatCell(MineLayer movingMineLayer) {
         int[] bestCell = null;
-        int bestDistance = Integer.MIN_VALUE;
-        for (int row = 0; row < rows; row++) {
-            for (int col = 0; col < cols; col++) {
-                if (isMineLayerOccupied(row, col, movingMineLayer) || isMineLayerTooCloseToBoat(row, col)) {
+        int bestDist = Integer.MIN_VALUE;
+
+        for (int nr = 0; nr < rows; nr++) {
+            for (int nc = 0; nc < cols; nc++) {
+                if (isMineLayerOccupied(nr, nc, movingMineLayer) || isMineLayerTooCloseToBoat(nr, nc)) {
                     continue;
                 }
 
-                int distance = Math.max(Math.abs(row - movingMineLayer.row), Math.abs(col - movingMineLayer.col));
-                if (distance > bestDistance) {
-                    bestDistance = distance;
-                    bestCell = new int[]{row, col};
+                int boatLeft = boatCol;
+                int boatRight = boatCol + BOAT_WIDTH - 1;
+                int closestCol = Math.max(boatLeft, Math.min(nc, boatRight));
+                int dist = Math.max(Math.abs(nr - boatRow), Math.abs(nc - closestCol));
+                if (dist > bestDist) {
+                    bestDist = dist;
+                    bestCell = new int[]{nr, nc};
                 }
             }
         }
