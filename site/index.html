@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hollow Ridge BBQ Co. — Small-batch barbecue sauce</title>
+<meta name="description" content="Small-batch barbecue sauce, cooked one pot at a time and shipped from the kitchen it was made in.">
+<meta property="og:title" content="Hollow Ridge BBQ Co.">
+<meta property="og:description" content="Small-batch barbecue sauce, cooked one pot at a time.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bitter:ital,wght@0,400;0,600;0,800;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#127830;</text></svg>">
+</head>
+<body>
+
+<a class="skip" href="#shop">Skip to the sauces</a>
+
+<header class="site-head">
+  <div class="wrap head-inner">
+    <a class="logo" href="#top">
+      <span class="logo-mark" aria-hidden="true"></span>
+      <span class="logo-text">
+        <span class="logo-name" data-brand></span>
+        <span class="logo-sub" data-brand-suffix></span>
+      </span>
+    </a>
+
+    <nav class="nav" aria-label="Main">
+      <a href="#shop">Sauces</a>
+      <a href="#story">Our story</a>
+      <a href="#faq">Shipping &amp; FAQ</a>
+      <a href="#contact">Contact</a>
+    </nav>
+
+    <button class="cart-btn" id="cartBtn" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M6 7h12l-1 12H7L6 7zm3 0a3 3 0 0 1 6 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Cart</span>
+      <span class="cart-count" id="cartCount" hidden>0</span>
+    </button>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- ── Hero ─────────────────────────────────────────── -->
+  <section class="hero">
+    <div class="wrap hero-inner">
+      <div class="hero-copy">
+        <p class="eyebrow">Made in <span data-town></span></p>
+        <h1>Sauce worth<br><em>getting on your shirt.</em></h1>
+        <p class="lede" data-tagline></p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#shop">Shop the sauces</a>
+          <a class="btn btn-ghost" href="#story">How it's made</a>
+        </div>
+        <ul class="hero-badges">
+          <li>Cooked in batches of 40</li>
+          <li>Labeled by hand</li>
+          <li>Free shipping over <span data-free-ship></span></li>
+        </ul>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <div class="bottle-stack"></div>
+      </div>
+    </div>
+    <div class="rule-smoke" aria-hidden="true"></div>
+  </section>
+
+  <!-- ── Shop ─────────────────────────────────────────── -->
+  <section id="shop" class="section">
+    <div class="wrap">
+      <header class="section-head">
+        <h2>The sauces</h2>
+        <p>Five recipes, one box that holds all of them. Every bottle is 16&nbsp;oz unless it says otherwise.</p>
+      </header>
+      <div class="grid" id="productGrid"></div>
+    </div>
+  </section>
+
+  <!-- ── Story ────────────────────────────────────────── -->
+  <section id="story" class="section section-dark">
+    <div class="wrap story-inner">
+      <div class="story-copy">
+        <h2>One person, one pot</h2>
+        <div id="storyText"></div>
+        <p class="signature">— the whole staff</p>
+      </div>
+      <ol class="steps">
+        <li><span>01</span><b>Cook</b>Forty bottles at a time, on a stove, watched the entire time.</li>
+        <li><span>02</span><b>Bottle</b>Hot-filled, sealed, and left to cool overnight on the counter.</li>
+        <li><span>03</span><b>Label</b>Stuck on straight-ish by hand, dated on the back.</li>
+        <li><span>04</span><b>Ship</b>Boxed with straw and out the door within two business days.</li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ── FAQ ──────────────────────────────────────────── -->
+  <section id="faq" class="section">
+    <div class="wrap narrow">
+      <header class="section-head">
+        <h2>Shipping &amp; questions</h2>
+      </header>
+      <div class="faq" id="faqList"></div>
+    </div>
+  </section>
+
+  <!-- ── Contact ──────────────────────────────────────── -->
+  <section id="contact" class="section section-ember">
+    <div class="wrap narrow contact-inner">
+      <h2>Say hello</h2>
+      <p>Wholesale, farmers markets, custom labels, or just a question about the vinegar mop — it all comes to the same inbox, and it's a real person reading it.</p>
+      <p class="contact-lines">
+        <a id="contactEmail" href="#"></a>
+        <span id="contactPhone"></span>
+        <a id="contactInsta" href="#" hidden></a>
+      </p>
+    </div>
+  </section>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap foot-inner">
+    <p>&copy; <span id="year"></span> <span data-brand></span> <span data-brand-suffix></span>. Made in <span data-town></span>.</p>
+    <p class="foot-links"><a href="#shop">Sauces</a> · <a href="#faq">Shipping</a> · <a href="#contact">Contact</a></p>
+  </div>
+</footer>
+
+<!-- ── Cart drawer ────────────────────────────────────── -->
+<div class="cart-scrim" id="cartScrim" hidden></div>
+<aside class="cart" id="cart" role="dialog" aria-modal="true" aria-label="Your cart" hidden>
+  <header class="cart-head">
+    <h2>Your cart</h2>
+    <button class="cart-close" id="cartClose" aria-label="Close cart">&times;</button>
+  </header>
+  <div class="cart-body" id="cartBody"></div>
+  <footer class="cart-foot" id="cartFoot"></footer>
+</aside>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="assets/js/config.js"></script>
+<script src="assets/js/app.js"></script>
+</body>
+</html>
